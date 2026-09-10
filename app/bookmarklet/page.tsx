@@ -1,17 +1,26 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { buildBookmarklet } from "@/lib/bookmarklet";
 import SiteHeader from "@/components/SiteHeader";
 
 export default function BookmarkletPage() {
   const [base, setBase] = useState("");
   const [copied, setCopied] = useState(false);
+  const linkRef = useRef<HTMLAnchorElement>(null);
+
+  const href = base ? buildBookmarklet(base) : "";
 
   useEffect(() => {
     setBase(window.location.origin);
   }, []);
 
-  const href = base ? buildBookmarklet(base) : "";
+  useEffect(() => {
+    // React 19 sanitizes `javascript:` hrefs into a throwing URL, which
+    // breaks drag-to-bookmark install. Set the real URL imperatively.
+    if (href && linkRef.current) {
+      linkRef.current.setAttribute("href", href);
+    }
+  }, [href]);
 
   async function copy() {
     try {
@@ -41,7 +50,8 @@ export default function BookmarkletPage() {
         <p>
           {href ? (
             <a
-              href={href}
+              ref={linkRef}
+              href="#"
               onClick={(e) => e.preventDefault()}
               title="Drag me to your bookmarks bar"
               style={{
