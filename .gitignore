@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+data/articles.json
+data/*.tmp
+*.log
+.DS_Store
+tsconfig.tsbuildinfo
