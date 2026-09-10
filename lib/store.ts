@@ -40,6 +40,29 @@ export async function getArticle(id: string): Promise<Article | null> {
   return all.find((a) => a.id === id) ?? null;
 }
 
+/** Canonical key for dedup: host lowercased, fragment stripped, trailing slash dropped. */
+export function normalizeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    let s = u.toString();
+    if (s.endsWith("/") && u.pathname !== "/") s = s.slice(0, -1);
+    return s;
+  } catch {
+    return url;
+  }
+}
+
+export async function findArticleByUrl(url: string): Promise<Article | null> {
+  const key = normalizeUrl(url);
+  const all = await readAll();
+  return all.find((a) => normalizeUrl(a.url) === key) ?? null;
+}
+
+/**
+ * Create an article unless one with the same URL already exists. Returns
+ * `{ article, created }` so callers can report duplicates.
+ */
 export async function createArticle(input: {
   url: string;
   title: string;
@@ -47,7 +70,9 @@ export async function createArticle(input: {
   excerpt: string | null;
   html: string;
   text: string;
-}): Promise<Article> {
+}): Promise<{ article: Article; created: boolean }> {
+  const existing = await findArticleByUrl(input.url);
+  if (existing) return { article: existing, created: false };
   const all = await readAll();
   const now = new Date().toISOString();
   const article: Article = {
@@ -64,7 +89,7 @@ export async function createArticle(input: {
   };
   all.push(article);
   await writeAll(all);
-  return article;
+  return { article, created: true };
 }
 
 export async function deleteArticle(id: string): Promise<boolean> {

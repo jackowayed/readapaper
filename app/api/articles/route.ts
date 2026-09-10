@@ -42,15 +42,15 @@ export async function POST(req: Request) {
       }
       const base = typeof body.url === "string" && body.url ? body.url : "https://localhost/";
       const extracted = extractFromHtml(body.html, base);
-      const article = await createArticle(extracted);
-      return json(article, 201);
+      const { article, created } = await createArticle(extracted);
+      return json(article, created ? 201 : 200);
     }
     if (!body.url || typeof body.url !== "string") {
       return json({ error: "Provide url or html" }, 400);
     }
     const extracted = await extractFromUrl(body.url);
-    const article = await createArticle(extracted);
-    return json(article, 201);
+    const { article, created } = await createArticle(extracted);
+    return json(article, created ? 201 : 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Save failed";
     const status = /Invalid|Only http|Blocked/.test(msg) ? 400 : 422;

@@ -41,8 +41,9 @@ fetch(BASE+'/api/articles',{method:'POST',headers:{'Content-Type':'application/j
 .then(function(x){
 if(!x.ok){done('Save failed: '+((x.body&&x.body.error)||('HTTP '+x.status))+'. <a href="'+BASE+'/bookmarklet" target="_blank" style="color:#93c5fd">Help</a>',10000);return;}
 var id=x.body&&x.body.id;
+var verb=(x.status===200)?'Already in':'Saved to';
 var link=id?'<br><a href="'+BASE+'/a/'+id+'" target="_blank" style="color:#93c5fd;font-weight:700">Open in Readapaper &rarr;</a>':'';
-done('Saved to Readapaper.'+link,0);
+done(verb+' Readapaper.'+link,0);
 })
 .catch(function(e){done('Save failed: '+(e&&e.message||e),8000);});
 }catch(e){done('Save failed: '+(e&&e.message||e),8000);}
