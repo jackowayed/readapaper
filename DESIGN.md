@@ -144,7 +144,7 @@ data/articles.json         # created at runtime
 - [x] 2026-09-10 (`a271e7e`): URL dedup on save — duplicate URL returns existing article (200) instead of a new row — `lib/store.ts` (normalizeUrl/findArticleByUrl), `app/api/articles/route.ts`, `lib/bookmarklet.ts` (toast says "Already in Readapaper")
 - [ ] Update this doc with deviations
 
-Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue); store file `data/articles.json` gitignored, resets to `[]`.
+Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`).
 
 ## 11. Risks
 - `speechSynthesis.onboundary` missing in Firefox -> fallback sentence highlight (handled).
