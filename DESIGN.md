@@ -117,14 +117,18 @@ data/articles.json         # created at runtime
 
 ## 9. Out of scope for v0 (documented extensions)
 
-1. **Server TTS + timestamps:** Polly/Google/ElevenLabs, S3/R2 audio cache, chunk playlist, `audio.currentTime` sync, offline download.
-2. **Save surfaces:** bookmarklet, browser extension (extract in-page with cookies to beat paywalls/CORS), iOS/Android share sheet, email-to-save, bulk import (Instapaper/Pocket CSV).
-3. **Multi-user + auth:** NextAuth/OAuth, per-user articles, Postgres + Drizzle/Prisma migration.
-4. **Offline PWA:** service worker, IndexedDB cache, background audio + Media Session API, lock-screen controls.
-5. **Paywall/bot handling:** headless fetch (Playwright), readability fallback to Jina/trafilatura, image proxy + caching, srcset responsive.
-6. **Library features:** tags/folders, archive/favorites, full-text search (pg_trgm/meilisearch), highlights + notes + export.
-7. **Reading extras:** EPUB/PDF export, estimated time left, e-ink mode, dyslexia font, translations/summaries (LLM).
-8. **Ops:** rate limiting, SSRF hardening allowlist, size caps, Sentry, E2E (Playwright) for extract+sync.
+- [ ] **Server TTS + timestamps:** Polly/Google/ElevenLabs, S3/R2 audio cache, chunk playlist, `audio.currentTime` sync, offline download.
+- [~] **Save surfaces:** browser extension (extract in-page with cookies to beat paywalls/CORS), iOS/Android share sheet, email-to-save, bulk import (Instapaper/Pocket CSV).
+  - [x] DONE 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet — `app/bookmarklet/page.tsx` + `lib/bookmarklet.ts`. Runs in live page DOM (cookies/sessions, rendered JS, unlocked text), POSTs `{url, html}` to `/api/articles` (CORS-enabled, 10MB cap) through the normal Readability + sanitize pipeline.
+- [ ] **Multi-user + auth:** NextAuth/OAuth, per-user articles, Postgres + Drizzle/Prisma migration.
+- [ ] **Offline PWA:** service worker, IndexedDB cache, background audio + Media Session API, lock-screen controls.
+- [~] **Paywall/bot handling:** headless fetch (Playwright), readability fallback to Jina/trafilatura, image proxy + caching.
+  - [x] DONE 2026-09-10 (`e3cdc80`): bookmarklet covers soft-paywall/login-gated/bot-blocked pages that render in the user's browser (hard paywalls that never render DOM text still unsavable — documented on `/bookmarklet`).
+  - [x] DONE 2026-09-10 (`b28930c`): responsive/lazy image restoration in `lib/extract.ts` — `srcset`/`data-srcset` picking (~960px preferred), `data-src`/`data-original`/lazy attrs, `<picture><source>` fallback, placeholder (`data:`/`blob:`) drop, pre-Readability pass so src-less `<img>` survive.
+- [ ] **Library features:** tags/folders, archive/favorites, full-text search (pg_trgm/meilisearch), highlights + notes + export.
+- [ ] **Reading extras:** EPUB/PDF export, estimated time left, e-ink mode, dyslexia font, translations/summaries (LLM).
+- [~] **Ops:** rate limiting, Sentry, E2E (Playwright) for extract+sync.
+  - [x] DONE (v0 baseline): SSRF guard (`assertSafeHttpUrl` blocklist in `lib/extract.ts`) + size/time caps (5MB server fetch, 10MB posted HTML, 15s timeout).
 
 ## 10. Task list (live — updated as we go)
 
@@ -135,6 +139,8 @@ data/articles.json         # created at runtime
 - [x] `SyncedReader`: voices/rate, sentence queue, word highlight, auto-scroll, click-to-seek
 - [x] Seed fixture + verify `npm run build`, extraction unit check
 - [x] Verified 2026-09-10: `tsc` clean, `next build` ok, smoke test (POST html->201, GET list/one, PUT progress, reader 200, DELETE 204), tokenizer check (3 sents/2 words)
+- [x] 2026-09-10 (`b28930c`): srcset-only/lazy/`<picture>` image restoration in extractor
+- [x] 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet (`/bookmarklet`, `POST {url, html}` with CORS) for paywalled/bot-blocked pages
 - [ ] Update this doc with deviations
 
 Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue); store file `data/articles.json` gitignored, resets to `[]`.
