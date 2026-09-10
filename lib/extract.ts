@@ -211,7 +211,7 @@ export function extractFromHtml(html: string, baseUrl: string): ExtractResult {
   const parsed = new Readability(doc).parse();
   if (!parsed || !parsed.textContent?.trim()) {
     throw new Error(
-      "Could not extract article text (JS-rendered or blocked page?). Try pasting page HTML via the extension path."
+      "Could not extract article text (JS-rendered or blocked page?). Use the bookmarklet (/bookmarklet) to save from the live page DOM."
     );
   }
   // Sanitize the Readability HTML fragment in a fresh doc so URLs absolutize correctly
