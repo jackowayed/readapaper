@@ -16,7 +16,7 @@ const ALLOWED_TAGS = [
   "ul", "ol", "li", "em", "strong", "code", "pre",
   "figure", "figcaption", "hr", "br",
 ];
-const ALLOWED_ATTR = ["href", "src", "alt", "title"];
+const ALLOWED_ATTR = ["href", "src", "alt", "title", "loading", "decoding"];
 
 const BLOCKED_HOSTS = new Set(["localhost", "metadata.google.internal"]);
 const BLOCKED_PREFIXES = ["127.", "10.", "192.168.", "169.254.", "::1", "::ffff:127."];
@@ -42,24 +42,121 @@ export function assertSafeHttpUrl(raw: string): URL {
   return u;
 }
 
+function pickFromSrcset(srcset: string | null): string | null {
+  if (!srcset) return null;
+  // "url1 80w, url2 640w, ..." or "url1 1x, url2 2x"
+  const candidates: { url: string; w: number; x: number }[] = [];
+  for (const part of srcset.split(",")) {
+    const tokens = part.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) continue;
+    const url = tokens[0];
+    if (!url || url.startsWith("data:")) continue;
+    let w = 0;
+    let x = 0;
+    const d = tokens[1] ?? "";
+    if (d.endsWith("w")) w = parseInt(d, 10) || 0;
+    else if (d.endsWith("x")) x = parseFloat(d) || 0;
+    candidates.push({ url, w, x });
+  }
+  if (candidates.length === 0) return null;
+  const withW = candidates.filter((c) => c.w > 0).sort((a, b) => a.w - b.w);
+  if (withW.length > 0) {
+    // Prefer something around reader-column width (~960px); else largest.
+    const preferred = withW.find((c) => c.w >= 960) ?? withW[withW.length - 1];
+    return preferred.url;
+  }
+  const withX = candidates.filter((c) => c.x > 0).sort((a, b) => a.x - b.x);
+  if (withX.length > 0) return withX[withX.length - 1].url;
+  return candidates[candidates.length - 1].url;
+}
+
+function isPlaceholderSrc(src: string | null): boolean {
+  if (!src) return true;
+  const s = src.trim();
+  if (!s) return true;
+  if (s.startsWith("data:")) return true;
+  if (s.startsWith("blob:")) return true;
+  if (s === "about:blank") return true;
+  return false;
+}
+
+const LAZY_SRC_ATTRS = [
+  "data-src",
+  "data-original",
+  "data-lazy-src",
+  "data-original-src",
+  "data-image-src",
+  "data-image",
+  "data-lazy",
+  "data-url",
+];
+const LAZY_SRCSET_ATTRS = ["data-srcset", "data-lazy-srcset", "data-original-srcset"];
+
 function absolutizeUrls(doc: Document, base: string) {
   const baseUrl = new URL(base);
+  const toAbs = (v: string | null): string | null => {
+    if (!v || isPlaceholderSrc(v)) return null;
+    try {
+      const abs = new URL(v.trim(), baseUrl).toString();
+      if (abs.startsWith("data:") || abs.startsWith("blob:")) return null;
+      return abs;
+    } catch {
+      return null;
+    }
+  };
   doc.querySelectorAll("img").forEach((img) => {
     const el = img as HTMLImageElement;
-    // promote lazy-load attrs
-    const lazy = el.getAttribute("data-src") || el.getAttribute("data-original");
-    if (lazy && !el.getAttribute("src")) el.setAttribute("src", lazy);
-    el.removeAttribute("srcset");
-    el.removeAttribute("data-src");
-    el.removeAttribute("data-srcset");
-    el.setAttribute("loading", "lazy");
-    const src = el.getAttribute("src");
-    if (src) {
-      try {
-        el.setAttribute("src", new URL(src, baseUrl).toString());
-      } catch {
-        el.removeAttribute("src");
+
+    // 1. usable src wins
+    let src = toAbs(el.getAttribute("src"));
+
+    // 2. lazy-load attrs
+    if (!src) {
+      for (const attr of LAZY_SRC_ATTRS) {
+        src = toAbs(el.getAttribute(attr));
+        if (src) break;
       }
+    }
+
+    // 3. srcset / lazy srcset (many sites, e.g. Hearst/SFGate, ship srcset-only <img>)
+    if (!src) {
+      src = toAbs(pickFromSrcset(el.getAttribute("srcset")));
+    }
+    if (!src) {
+      for (const attr of LAZY_SRCSET_ATTRS) {
+        src = toAbs(pickFromSrcset(el.getAttribute(attr)));
+        if (src) break;
+      }
+    }
+
+    // 4. <picture><source srcset> fallback
+    if (!src) {
+      const picture = el.parentElement;
+      if (picture && picture.tagName.toLowerCase() === "picture") {
+        const sources = picture.querySelectorAll("source[srcset], source[data-srcset]");
+        for (const s of Array.from(sources)) {
+          src =
+            toAbs(pickFromSrcset(s.getAttribute("srcset"))) ??
+            toAbs(pickFromSrcset(s.getAttribute("data-srcset")));
+          if (src) break;
+        }
+      }
+    }
+
+    // Clean lazy/responsive attrs; we keep a single absolutized src
+    // to avoid broken srcset URLs and layout shift in reader view.
+    el.removeAttribute("srcset");
+    el.removeAttribute("sizes");
+    for (const attr of [...LAZY_SRC_ATTRS, ...LAZY_SRCSET_ATTRS]) el.removeAttribute(attr);
+
+    if (src) {
+      el.setAttribute("src", src);
+      el.setAttribute("loading", "lazy");
+      el.setAttribute("decoding", "async");
+    } else {
+      // No recoverable URL (tracking pixel, empty) — drop so the
+      // reader doesn't render broken-image icons.
+      el.remove();
     }
   });
   doc.querySelectorAll("a").forEach((a) => {
@@ -107,6 +204,10 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
 export function extractFromHtml(html: string, baseUrl: string): ExtractResult {
   const dom = new JSDOM(html, { url: baseUrl });
   const doc = dom.window.document;
+  // Pre-pass before Readability: promote srcset/lazy attrs to src so
+  // Readability keeps srcset-only <img> (it drops src-less images) and
+  // <picture><source> fallbacks.
+  absolutizeUrls(doc, baseUrl);
   const parsed = new Readability(doc).parse();
   if (!parsed || !parsed.textContent?.trim()) {
     throw new Error(
