@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getArticle } from "@/lib/store";
 import { readingMinutes } from "@/lib/text";
-import ThemeControl from "@/components/ThemeControl";
+import SiteHeader from "@/components/SiteHeader";
 import ReaderClient from "@/components/ReaderClient";
 
 export const dynamic = "force-dynamic";
@@ -13,17 +13,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <header className="topbar">
-        <a className="brand" href="/">
-          ← Library
-        </a>
-        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-          <a className="muted" href="/bookmarklet">
-            Bookmarklet
-          </a>
-          <ThemeControl />
-        </div>
-      </header>
+      <SiteHeader brandLabel="← Library" />
       <main className="narrow">
         <h1>{article.title}</h1>
         <p className="muted">

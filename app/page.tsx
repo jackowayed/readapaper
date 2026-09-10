@@ -1,6 +1,6 @@
 import SaveForm from "@/components/SaveForm";
 import ArticleList from "@/components/ArticleList";
-import ThemeControl from "@/components/ThemeControl";
+import SiteHeader from "@/components/SiteHeader";
 import { listArticles, toSummary } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -9,17 +9,7 @@ export default async function Home() {
   const articles = (await listArticles()).map(toSummary);
   return (
     <>
-      <header className="topbar">
-        <a className="brand" href="/">
-          📚 Readapaper
-        </a>
-        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-          <a className="muted" href="/bookmarklet">
-            Bookmarklet
-          </a>
-          <ThemeControl />
-        </div>
-      </header>
+      <SiteHeader brandLabel="📚 Readapaper" />
       <main className="narrow">
         <h1>Save it. Read it. Listen in sync.</h1>
         <SaveForm />

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { buildBookmarklet } from "@/lib/bookmarklet";
+import SiteHeader from "@/components/SiteHeader";
 
 export default function BookmarkletPage() {
   const [base, setBase] = useState("");
@@ -24,14 +25,7 @@ export default function BookmarkletPage() {
 
   return (
     <>
-      <header className="topbar">
-        <a className="brand" href="/">
-          📚 Readapaper
-        </a>
-        <a className="muted" href="/">
-          ← Library
-        </a>
-      </header>
+      <SiteHeader brandLabel="📚 Readapaper" showBookmarkletLink={false} />
       <main className="narrow">
         <h1>Save bookmarklet</h1>
         <p className="muted">
