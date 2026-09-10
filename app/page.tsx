@@ -13,7 +13,12 @@ export default async function Home() {
         <a className="brand" href="/">
           📚 Readapaper
         </a>
-        <ThemeControl />
+        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+          <a className="muted" href="/bookmarklet">
+            Bookmarklet
+          </a>
+          <ThemeControl />
+        </div>
       </header>
       <main className="narrow">
         <h1>Save it. Read it. Listen in sync.</h1>

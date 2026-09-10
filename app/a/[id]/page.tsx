@@ -17,7 +17,12 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         <a className="brand" href="/">
           ← Library
         </a>
-        <ThemeControl />
+        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+          <a className="muted" href="/bookmarklet">
+            Bookmarklet
+          </a>
+          <ThemeControl />
+        </div>
       </header>
       <main className="narrow">
         <h1>{article.title}</h1>
