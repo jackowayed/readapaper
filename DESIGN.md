@@ -53,7 +53,7 @@ v0 store: `data/articles.json` (array). Atomic write via tmp+rename. Prod path: 
 
 - `POST /api/extract` `{url}` -> `{title, byline, excerpt, html, text}` | 400 invalid URL | 422 extraction failed
 - `GET /api/articles` -> `Article[]` (summary sorted desc)
-- `POST /api/articles` `{url} | {url, titleOverride} | {html pre-extracted}` -> `Article` (server re-extracts if only URL given)
+- `POST /api/articles` `{url} | {url, titleOverride} | {html pre-extracted}` -> `Article` (server re-extracts if only URL given). Dedup by canonical URL (`normalizeUrl`: host-lowercased, fragment stripped, trailing slash dropped): existing URL returns the stored `Article` with `200` and creates nothing; new saves return `201`.
 - `GET /api/articles/:id` -> `Article`
 - `DELETE /api/articles/:id` -> 204
 - `PUT /api/articles/:id/progress` `{progress: 0..1}` -> `{ok:true}`
@@ -141,6 +141,7 @@ data/articles.json         # created at runtime
 - [x] Verified 2026-09-10: `tsc` clean, `next build` ok, smoke test (POST html->201, GET list/one, PUT progress, reader 200, DELETE 204), tokenizer check (3 sents/2 words)
 - [x] 2026-09-10 (`b28930c`): srcset-only/lazy/`<picture>` image restoration in extractor
 - [x] 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet (`/bookmarklet`, `POST {url, html}` with CORS) for paywalled/bot-blocked pages
+- [x] 2026-09-10 (`a271e7e`): URL dedup on save — duplicate URL returns existing article (200) instead of a new row — `lib/store.ts` (normalizeUrl/findArticleByUrl), `app/api/articles/route.ts`, `lib/bookmarklet.ts` (toast says "Already in Readapaper")
 - [ ] Update this doc with deviations
 
 Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue); store file `data/articles.json` gitignored, resets to `[]`.
