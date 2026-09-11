@@ -1,0 +1,110 @@
+/**
+ * Proactive offline cache warming — fetch the library + every article
+ * document through the service worker so unopened articles stay readable
+ * offline. The service worker caches these responses on the way through
+ * (see public/sw.js); this module just triggers the requests and records
+ * what was warmed.
+ */
+
+export type OfflineReady = {
+  count: number;
+  at: string;
+};
+
+export type WarmStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+export const OFFLINE_READY_KEY = "readapaper:offline-ready";
+
+function defaultStorage(): WarmStorage | null {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) return window.localStorage;
+  } catch {
+    // SSR / private mode: no storage
+  }
+  return null;
+}
+
+export function readOfflineReady(
+  storage: WarmStorage | null = defaultStorage()
+): OfflineReady | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(OFFLINE_READY_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as OfflineReady).count === "number" &&
+      typeof (parsed as OfflineReady).at === "string"
+    ) {
+      return parsed as OfflineReady;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+type WarmFetcher = (url: string) => Promise<{
+  ok: boolean;
+  json: () => Promise<unknown>;
+}>;
+
+function defaultFetcher(url: string) {
+  return fetch(url);
+}
+
+/**
+ * Warm the offline cache: library page first, then every article document.
+ * Failures are tolerated per-URL (offline mid-warm keeps what succeeded).
+ * Returns { warmed, total } and persists the result for the UI banner.
+ */
+export async function warmOfflineCache(
+  fetcher: WarmFetcher = defaultFetcher,
+  storage: WarmStorage | null = defaultStorage()
+): Promise<{ warmed: number; total: number }> {
+  let total = 0;
+  let warmed = 0;
+  try {
+    // Library page first so `/` itself renders offline.
+    const home = await fetcher("/");
+    if (home.ok) warmed += 1;
+
+    const listRes = await fetcher("/api/articles");
+    if (!listRes.ok) return finish(storage, warmed, total);
+    const list: unknown = await listRes.json();
+    const ids = Array.isArray(list)
+      ? list
+          .map((a) => (typeof a === "object" && a !== null ? (a as { id?: unknown }).id : null))
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    total = ids.length;
+
+    const results = await Promise.allSettled(ids.map((id) => fetcher(`/a/${id}`)));
+    warmed += results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+  } catch {
+    // offline mid-warm — keep whatever succeeded
+  }
+  return finish(storage, warmed, total);
+}
+
+function finish(
+  storage: WarmStorage | null,
+  warmed: number,
+  total: number
+): { warmed: number; total: number } {
+  try {
+    storage?.setItem(
+      OFFLINE_READY_KEY,
+      JSON.stringify({ count: warmed, at: new Date().toISOString() } satisfies OfflineReady)
+    );
+  } catch {
+    // storage unavailable — result still returned
+  }
+  return { warmed, total };
+}

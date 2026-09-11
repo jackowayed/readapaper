@@ -9,16 +9,21 @@
  * POST/PUT/DELETE (saves, progress) always hit the network — progress writes
  * made while offline are queued client-side in localStorage
  * (see lib/offline-queue.ts) and replayed on reconnect.
+ *
+ * Proactive warming (see lib/offline-cache.ts): the library page fetches `/`
+ * plus every `/a/[id]` document while online so unopened articles are already
+ * cached. On-demand visits cache the same way.
  */
 
-const CACHE = "readapaper-v1";
+const CACHE = "readapaper-v2";
 const OFFLINE_URL = "/offline";
+const PRECACHE_URLS = [OFFLINE_URL, "/"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.add(OFFLINE_URL))
+      .then((cache) => Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url))))
       .catch(() => undefined)
       .then(() => self.skipWaiting())
   );

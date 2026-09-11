@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { flushPendingProgress, readPendingProgress } from "@/lib/offline-queue";
+import { readOfflineReady } from "@/lib/offline-cache";
 
 /**
  * Registers /sw.js once, then flushes queued progress writes whenever the
@@ -10,10 +11,12 @@ import { flushPendingProgress, readPendingProgress } from "@/lib/offline-queue";
 export default function OfflineSupport() {
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState(0);
+  const [ready, setReady] = useState(0);
 
   useEffect(() => {
     setOnline(navigator.onLine);
     setPending(readPendingProgress().length);
+    setReady(readOfflineReady()?.count ?? 0);
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -48,6 +51,9 @@ export default function OfflineSupport() {
       if (e.key === "readapaper:pending-progress") {
         setPending(readPendingProgress().length);
       }
+      if (e.key === "readapaper:offline-ready") {
+        setReady(readOfflineReady()?.count ?? 0);
+      }
     }
 
     window.addEventListener("online", onOnline);
@@ -66,7 +72,7 @@ export default function OfflineSupport() {
   return (
     <p className="muted" role="status" style={{ textAlign: "center", margin: "0.5rem 0 0" }}>
       {!online
-        ? `Offline — reading cached articles. Progress will sync when you reconnect${
+        ? `Offline — ${ready ? `${ready} cached pages ready to read` : "no cached pages yet; reconnect and open the library to cache articles"}. Progress will sync when you reconnect${
             pending ? ` (${pending} pending)` : ""
           }.`
         : `${pending} reading-progress update${pending === 1 ? "" : "s"} pending sync…`}

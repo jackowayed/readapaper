@@ -1,5 +1,6 @@
 import SaveForm from "@/components/SaveForm";
 import ArticleList from "@/components/ArticleList";
+import OfflineCacheButton from "@/components/OfflineCacheButton";
 import SiteHeader from "@/components/SiteHeader";
 import { listArticles, toSummary } from "@/lib/store";
 
@@ -18,6 +19,7 @@ export default async function Home() {
           the live page DOM.
         </p>
         <h2>Library ({articles.length})</h2>
+        <OfflineCacheButton />
         <ArticleList articles={articles} />
       </main>
     </>

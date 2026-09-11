@@ -47,7 +47,7 @@ test("manifest, service worker, and offline page are served", async ({ page, req
 
   const sw = await request.get("/sw.js");
   expect(sw.status()).toBe(200);
-  expect(await sw.text()).toContain("readapaper-v1");
+  expect(await sw.text()).toContain("readapaper-");
 
   await page.goto("/");
   await expect(page.locator('link[rel="manifest"]')).toHaveCount(1);
@@ -77,6 +77,34 @@ test("cached article stays readable offline", async ({ page, request, context })
   await context.setOffline(true);
   try {
     await page.reload();
+    await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+  }
+  createdIds.splice(createdIds.indexOf(saved.id), 1);
+  expect((await request.delete(`/api/articles/${saved.id}`)).status()).toBe(204);
+});
+
+test("library warming caches unopened articles for offline", async ({ page, request, context }) => {
+  const html = await fs.readFile(FIXTURE, "utf8");
+  const post = await request.post("/api/articles", {
+    data: { url: uniqueUrl("e2e-offline-warm"), html },
+  });
+  expect(post.status()).toBe(201);
+  const saved = (await post.json()) as { id: string };
+  createdIds.push(saved.id);
+
+  // Open only the library: auto-warm caches the article without visiting it.
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /available offline/ })).toBeVisible({
+    timeout: 20000,
+  });
+
+  // Cut the network and open the never-visited article.
+  await context.setOffline(true);
+  try {
+    const articleRes = await page.goto(`/a/${saved.id}`);
+    expect(articleRes?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
   } finally {
     await context.setOffline(false);
