@@ -34,9 +34,12 @@ read `/a/[id]` -> progress resume -> delete, plus the bookmarklet
 
 The offline spec (`tests/e2e/offline.spec.ts`) covers the PWA shell:
 `/manifest.webmanifest` + `/sw.js` served, `rel="manifest"` on `/`, `/offline`
-fallback page, and a cached article that still renders with the browser offline
-(`context.setOffline(true)`). Chromium needs its system libs to launch — if
-the browser won't start locally, CI's `e2e` job is the backstop.
+fallback page, a cached article that still renders with the browser offline
+(`context.setOffline(true)`), and library warming: an article never opened
+still renders offline after the "available offline" control warms the cache.
+Unit tests for the warming logic live in `tests/offline-cache.test.ts` (stubbed
+fetch + storage, no browser needed). Chromium needs its system libs to launch
+— if the browser won't start locally, CI's `e2e` job is the backstop.
 
 Zero residue: the suite backs up `data/articles.json` before running and
 restores it afterwards, and every run uses per-run unique URLs so parallel or
