@@ -26,7 +26,7 @@ export default function ReaderClient({ article }: { article: Article }) {
           dangerouslySetInnerHTML={{ __html: article.html }}
         />
       ) : (
-        <SyncedReader text={article.text} />
+        <SyncedReader text={article.text} title={article.title} />
       )}
     </div>
   );

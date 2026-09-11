@@ -12,6 +12,10 @@ export default function SaveForm() {
     e.preventDefault();
     setError(null);
     if (!url.trim()) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setError("You're offline — reconnect to save new articles.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/articles", {

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { persistProgress } from "@/lib/offline-queue";
 
 export default function ThemeControl() {
   useEffect(() => {
@@ -67,11 +68,14 @@ export function useReadingProgress(articleId: string, initial: number) {
         const h = document.documentElement.scrollHeight - window.innerHeight;
         if (h <= 0) return;
         const p = Math.min(1, Math.max(0, window.scrollY / h));
-        fetch(`/api/articles/${articleId}/progress`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ progress: p }),
-        }).catch(() => {});
+        // Offline-safe: queues in localStorage and replays on reconnect.
+        persistProgress(articleId, p, async (id, progress) =>
+          fetch(`/api/articles/${id}/progress`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ progress }),
+          })
+        ).catch(() => {});
       }, 600);
     }
     window.addEventListener("scroll", onScroll, { passive: true });

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSentences, splitWords } from "@/lib/text";
+import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
 
 /**
  * SyncedReader — Web Speech API driver (v0).
@@ -8,8 +9,9 @@ import { splitSentences, splitWords } from "@/lib/text";
  *   long-utterance cutoff / 15s pause bug).
  * - Highlights current word via onboundary charIndex + auto-scrolls.
  * - Click any word to seek. Firefox lacks word boundaries -> sentence fallback.
+ * - Media Session API: lock-screen / background play/pause/stop controls.
  */
-export default function SyncedReader({ text }: { text: string }) {
+export default function SyncedReader({ text, title }: { text: string; title?: string }) {
   const sentences = useMemo(() => splitSentences(text), [text]);
   const words = useMemo(() => splitWords(text), [text]);
   const paragraphs = useMemo(() => {
@@ -177,6 +179,24 @@ export default function SyncedReader({ text }: { text: string }) {
   function onSeek(offset: number) {
     speakSentenceRange(offset);
   }
+
+  // Lock-screen / background controls while listening.
+  const playPauseRef = useRef(onPlayPause);
+  playPauseRef.current = onPlayPause;
+  const stopRef = useRef(onStop);
+  stopRef.current = onStop;
+  useEffect(() => {
+    if (!playing) {
+      clearMediaSession();
+      return;
+    }
+    setupMediaSession(title ?? "Readapaper", {
+      onPlay: () => playPauseRef.current(),
+      onPause: () => playPauseRef.current(),
+      onStop: () => stopRef.current(),
+    });
+    return () => clearMediaSession();
+  }, [playing, title]);
 
   if (!supported) {
     return (
