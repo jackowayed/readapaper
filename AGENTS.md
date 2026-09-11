@@ -13,3 +13,16 @@ After feature/fix work that changes scope, before finishing your turn:
    - `Deviations from plan` line: note any new infra/workaround (deps, config, gitignored paths).
 3. Never mark something done from intent or plan — only from commits/code on disk. Cite the short SHA and the files touched.
 4. Keep the §9 list stable: don't delete or renumber remaining items, just check off what's completed.
+
+## Test your work (mandatory)
+
+Cover new behavior with tests, then prove the gates are green:
+
+1. Add/extend tests with the change (not after):
+   - `lib/*` logic -> `tests/*.test.ts` (see `TESTING.md` for the store temp-dir isolation pattern; never touch the real `data/articles.json`).
+   - New extraction HTML shapes -> fixture in `tests/fixtures/` + case in `tests/extract.test.ts`.
+   - Route behavior/status codes -> `tests/routes.test.ts` (stateful modules: reset via exported hooks + `vi.resetModules`, see `tests/rate-limit.test.ts`).
+   - User-visible flows (save/read/progress/delete, bookmarklet) -> `tests/e2e/*.spec.ts` with unique URLs per run + cleanup; keep the suite serial (`workers: 1` — the JSON store has no write mutex).
+2. Run the gates before finishing: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`. Add `npm run build` when routes/config change, `npm run test:e2e` when flows/store/routes change. Keep `lib/` coverage >= 80% (`npm run coverage`).
+3. Respect the budgets: e2e + route tests share the 30 req/min/IP limiter — many rapid POSTs will 429; use `setRateLimitOverride` or fewer calls instead.
+4. Update `QUALITY_PLAN.md` checkboxes + log when a P1/P2 item lands; extend `TESTING.md` when adding a new test kind. The `DESIGN.md` sync rule above still applies.
