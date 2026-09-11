@@ -14,6 +14,12 @@ After feature/fix work that changes scope, before finishing your turn:
 3. Never mark something done from intent or plan — only from commits/code on disk. Cite the short SHA and the files touched.
 4. Keep the §9 list stable: don't delete or renumber remaining items, just check off what's completed.
 
+## Commit your work as you go (mandatory)
+
+- Commit early and often, in logical units — don't batch a whole session into one commit at the end.
+- If later work in the same session fixes, refactors, or otherwise belongs to an earlier commit that has NOT YET BEEN PUSHED, amend or squash it into that commit instead of adding a separate "fixup" commit. Only use separate commits for genuinely separate scope.
+- Never amend/squash commits that have already been pushed.
+
 ## Test your work (mandatory)
 
 Cover new behavior with tests, then prove the gates are green:
