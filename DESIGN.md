@@ -1,7 +1,9 @@
 # Readapaper — Design Doc (v0)
 
 ## 1. Goal
+
 Instapaper clone with 3 core features:
+
 1. **Save:** paste a URL, extract just the article text/HTML.
 2. **Read:** clean reader view with themes, progress resume.
 3. **Listen+Sync:** TTS that highlights words + auto-scrolls, click any word to seek, switch freely between reading and listening.
@@ -27,6 +29,7 @@ Web Speech API (client-only TTS, speechSynthesis + onboundary)
 No external DB, no S3, no auth in v0. Storage layer is abstracted (`lib/store.ts`) so it can swap to Postgres later without touching routes.
 
 Why Next.js single app (not separate FE/BE):
+
 - One deploy, API routes suffice for fetch+parse (avoids CORS).
 - Later split is easy: routes already REST-shaped.
 
@@ -34,16 +37,16 @@ Why Next.js single app (not separate FE/BE):
 
 ```ts
 type Article = {
-  id: string;            // nanoid
-  url: string;           // canonical, absolutized
+  id: string; // nanoid
+  url: string; // canonical, absolutized
   title: string;
   byline: string | null;
   excerpt: string | null;
-  html: string;          // sanitized reader HTML
-  text: string;          // plain text for TTS/search
+  html: string; // sanitized reader HTML
+  text: string; // plain text for TTS/search
   wordCount: number;
-  progress: number;      // 0..1 scroll fraction
-  createdAt: string;     // ISO
+  progress: number; // 0..1 scroll fraction
+  createdAt: string; // ISO
 };
 ```
 
@@ -82,6 +85,7 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 ## 7. Synced TTS design
 
 ### v0: Web Speech API (`speechSynthesis`)
+
 - `utterance.onboundary` gives `{charIndex, charLength, name:'word'}` in Chrome/Edge/Safari (Firefox: sentence-only — degrade to sentence highlight).
 - Pre-tokenize `article.text` into sentences -> speak as a queue of utterances (enables click-to-seek per sentence + avoids 15k-char Chrome cutoff). Track `globalCharOffset` per utterance.
 - Highlight: map `charIndex` -> word `<span>`. Render text layer as word spans (separate from HTML display? v0 highlights the plain-text view; HTML view dims to sentence). Simpler robust approach: **sync overlay** — display `text` tokenized view for listening mode, keep rich HTML for reading mode, toggle preserves scroll anchor.
@@ -91,6 +95,7 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 Limitations accepted in v0: voice quality varies, no background iOS play, no exact seek within sentence, no offline audio file.
 
 ### Prod upgrade path (not in v0, see §9):
+
 Pre-generate MP3 + word timestamps (Polly `SpeechMarks` / Google `timepoints`), serve playlist, drive highlight off `audio.currentTime` via binary search + rAF. Same `SyncedReader` interface, different driver (`SpeechDriver` abstraction).
 
 ## 8. File layout (v0)
@@ -129,6 +134,7 @@ data/articles.json         # created at runtime
 - [ ] **Reading extras:** EPUB/PDF export, estimated time left, e-ink mode, dyslexia font, translations/summaries (LLM).
 - [~] **Ops:** rate limiting, Sentry, E2E (Playwright) for extract+sync.
   - [x] DONE (v0 baseline): SSRF guard (`assertSafeHttpUrl` blocklist in `lib/extract.ts`) + size/time caps (5MB server fetch, 10MB posted HTML, 15s timeout).
+  - [x] DONE 2026-09-11 (`e3a193e`): P0 quality gates — vitest unit suite (`tests/`, 79 tests, ~95% stmts on `lib/`) + `typecheck`/`eslint .`/`prettier` + CI (`.github/workflows/ci.yml`, Node 20/22) — `QUALITY_PLAN.md`, `vitest.config.ts`, `eslint.config.mjs`, `tsconfig.json`, `.prettierrc`, `.husky/`, `next.config.mjs` (`ignoreDuringBuilds: false`). E2E/rate-limit/Sentry still open.
 
 ## 10. Task list (live — updated as we go)
 
@@ -142,11 +148,13 @@ data/articles.json         # created at runtime
 - [x] 2026-09-10 (`b28930c`): srcset-only/lazy/`<picture>` image restoration in extractor
 - [x] 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet (`/bookmarklet`, `POST {url, html}` with CORS) for paywalled/bot-blocked pages
 - [x] 2026-09-10 (`a271e7e`): URL dedup on save — duplicate URL returns existing article (200) instead of a new row — `lib/store.ts` (normalizeUrl/findArticleByUrl), `app/api/articles/route.ts`, `lib/bookmarklet.ts` (toast says "Already in Readapaper")
+- [x] 2026-09-11 (`e3a193e`): P0 quality gates per `QUALITY_PLAN.md` — vitest (79 tests) + strict `tsc` + `eslint .` + prettier + husky/lint-staged + CI; `typecheck`/`lint`/`format:check`/`test`/`build` all green
 - [ ] Update this doc with deviations
 
-Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`).
+Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue — since flipped back to `false` once `eslint .` flat config landed 2026-09-11); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`); quality tooling 2026-09-11 (`e3a193e`): `vitest@5` + `@vitest/coverage-v8`, `typescript-eslint@8` + `eslint-plugin-react-hooks`, `prettier@3`, `husky@9` + `lint-staged`, `.github/workflows/ci.yml`, `vitest.config.ts`, `tests/` + `tests/fixtures/`.
 
 ## 11. Risks
+
 - `speechSynthesis.onboundary` missing in Firefox -> fallback sentence highlight (handled).
 - Chrome 15s pause bug for long utterances -> mitigated by sentence-chunk queue.
 - SSRF via URL fetch -> protocol/host blocklist + size/time caps (v0 basic).
