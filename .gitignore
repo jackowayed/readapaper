@@ -10,3 +10,6 @@ data/*.tmp
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
+# Serwist — generated service worker (built from app/sw.ts)
+public/sw*
+public/swe-worker*

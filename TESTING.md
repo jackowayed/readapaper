@@ -24,13 +24,14 @@ Gate: **>=80% on `lib/`**. Coverage config (`include: ["lib/**/*.ts"]`) is in
 ## E2E
 
 ```bash
-npm run test:e2e      # playwright test (chromium)
+npm run test:e2e      # playwright test (chromium, against a prod build)
 ```
 
-No manual server boot needed: the Playwright config's `webServer` starts the
-app automatically. The suite runs on **chromium** and covers save URL -> list ->
-read `/a/[id]` -> progress resume -> delete, plus the bookmarklet
-`POST {url,html}` flow.
+No manual server boot needed: the Playwright config's `webServer` starts
+`next start` automatically — but it serves the **production build**, so run
+`npm run build` first (the service worker only activates on prod builds).
+The suite runs on **chromium** and covers save URL -> list -> read `/a/[id]`
+-> progress resume -> delete, plus the bookmarklet `POST {url,html}` flow.
 
 The offline spec (`tests/e2e/offline.spec.ts`) covers the PWA shell:
 `/manifest.webmanifest` + `/sw.js` served, `rel="manifest"` on `/`, `/offline`

@@ -47,7 +47,9 @@ test("manifest, service worker, and offline page are served", async ({ page, req
 
   const sw = await request.get("/sw.js");
   expect(sw.status()).toBe(200);
-  expect(await sw.text()).toContain("readapaper-");
+  const swText = await sw.text();
+  // Serwist-generated worker: build-time precache manifest + offline fallback.
+  expect(swText).toContain("'/offline'");
 
   await page.goto("/");
   await expect(page.locator('link[rel="manifest"]')).toHaveCount(1);
