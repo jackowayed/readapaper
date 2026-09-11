@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { readOfflineReady, warmOfflineCache, type WarmStorage } from "../lib/offline-cache";
+import {
+  readOfflineReady,
+  shouldWarm,
+  warmOfflineCache,
+  WARM_MAX_AGE_MS,
+  type WarmStorage,
+} from "../lib/offline-cache";
 
 function memStorage(): WarmStorage {
   const map = new Map<string, string>();
@@ -75,5 +81,29 @@ describe("offline cache warming", () => {
     const { warmed, total } = await warmOfflineCache(fetch, null);
     expect(warmed).toBe(1);
     expect(total).toBe(0);
+  });
+});
+
+describe("shouldWarm", () => {
+  it("warms when never warmed, corrupt, or stale", () => {
+    const s = memStorage();
+    expect(shouldWarm(s)).toBe(true);
+    s.setItem("readapaper:offline-ready", "nope{{");
+    expect(shouldWarm(s)).toBe(true);
+    s.setItem(
+      "readapaper:offline-ready",
+      JSON.stringify({ count: 3, at: new Date(Date.now() - WARM_MAX_AGE_MS - 1000).toISOString() })
+    );
+    expect(shouldWarm(s)).toBe(true);
+  });
+
+  it("skips when freshly warmed", () => {
+    const s = memStorage();
+    s.setItem(
+      "readapaper:offline-ready",
+      JSON.stringify({ count: 3, at: new Date().toISOString() })
+    );
+    expect(shouldWarm(s)).toBe(false);
+    expect(shouldWarm(null)).toBe(true);
   });
 });

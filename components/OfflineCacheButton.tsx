@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readOfflineReady, warmOfflineCache } from "@/lib/offline-cache";
+import { readOfflineReady, shouldWarm, warmOfflineCache } from "@/lib/offline-cache";
 
 /**
  * Proactive offline control for the library page. Warms the service-worker
@@ -43,7 +43,8 @@ export default function OfflineCacheButton() {
     }
     if (!ran.current && navigator.onLine) {
       ran.current = true;
-      void warm();
+      // Auto-warm only when stale; the button always forces a refresh.
+      if (shouldWarm()) void warm();
     }
   }, [warm]);
 

@@ -18,6 +18,8 @@ export type WarmStorage = {
 };
 
 export const OFFLINE_READY_KEY = "readapaper:offline-ready";
+/** Auto-warm at most this often; the manual button always warms. */
+export const WARM_MAX_AGE_MS = 10 * 60 * 1000;
 
 function defaultStorage(): WarmStorage | null {
   try {
@@ -57,6 +59,23 @@ type WarmFetcher = (url: string) => Promise<{
 
 function defaultFetcher(url: string) {
   return fetch(url);
+}
+
+/**
+ * True when no warm has run yet or the last one is older than maxAgeMs.
+ * Guards the automatic warm so every library visit doesn't refetch all
+ * articles (in dev each render is slow; in prod it's just wasted traffic).
+ */
+export function shouldWarm(
+  storage: WarmStorage | null = defaultStorage(),
+  maxAgeMs: number = WARM_MAX_AGE_MS,
+  now: number = Date.now()
+): boolean {
+  const prev = readOfflineReady(storage);
+  if (!prev) return true;
+  const at = Date.parse(prev.at);
+  if (Number.isNaN(at)) return true;
+  return now - at > maxAgeMs;
 }
 
 /**
