@@ -63,6 +63,8 @@ v0 store: `data/articles.json` (array). Atomic write via tmp+rename. Prod path: 
 
 All HTML responses sanitized server-side. Client never injects raw fetch HTML.
 
+CORS: `POST /api/articles` intentionally sends `Access-Control-Allow-Origin: *` because the bookmarklet POSTs `{url, html}` cross-origin from arbitrary article pages, where same-origin or allowlist CORS is impossible. The endpoint has no auth and stores only user-supplied reading content, so the residual risk is third-party write spam, bounded by the 30 req/min/IP limiter (`lib/rate-limit.ts`). Revisit if the endpoint ever gains credentials or non-public data. Both POSTs (`/api/articles`, `/api/extract`) are rate-limited to 30 req/min/IP (429 + `Retry-After`); failures log `console.error` with route + URL host only (never HTML/body).
+
 ## 5. Extraction pipeline
 
 1. Validate URL (http/https only, block localhost/169.254 / metadata IPs — SSRF guard).
@@ -135,6 +137,7 @@ data/articles.json         # created at runtime
 - [~] **Ops:** rate limiting, Sentry, E2E (Playwright) for extract+sync.
   - [x] DONE (v0 baseline): SSRF guard (`assertSafeHttpUrl` blocklist in `lib/extract.ts`) + size/time caps (5MB server fetch, 10MB posted HTML, 15s timeout).
   - [x] DONE 2026-09-11 (`e3a193e`): P0 quality gates — vitest unit suite (`tests/`, 79 tests, ~95% stmts on `lib/`) + `typecheck`/`eslint .`/`prettier` + CI (`.github/workflows/ci.yml`, Node 20/22) — `QUALITY_PLAN.md`, `vitest.config.ts`, `eslint.config.mjs`, `tsconfig.json`, `.prettierrc`, `.husky/`, `next.config.mjs` (`ignoreDuringBuilds: false`). E2E/rate-limit/Sentry still open.
+  - [x] DONE 2026-09-11 (`8ec651d`): P2 — Playwright e2e (`tests/e2e/`, 4 tests: CRUD + bookmarklet-dedup/CORS, zero-residue via backup/restore) + separate CI `e2e` job; 30 req/min/IP limits on both POSTs (`lib/rate-limit.ts`, 429 + `Retry-After`) + host-only error logging; Dependabot weekly + `npm audit --audit-level=critical` in CI; `TESTING.md`. Sentry + `high`-level audit (postcss-via-Next, needs breaking Next major) still open.
 
 ## 10. Task list (live — updated as we go)
 
@@ -149,9 +152,10 @@ data/articles.json         # created at runtime
 - [x] 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet (`/bookmarklet`, `POST {url, html}` with CORS) for paywalled/bot-blocked pages
 - [x] 2026-09-10 (`a271e7e`): URL dedup on save — duplicate URL returns existing article (200) instead of a new row — `lib/store.ts` (normalizeUrl/findArticleByUrl), `app/api/articles/route.ts`, `lib/bookmarklet.ts` (toast says "Already in Readapaper")
 - [x] 2026-09-11 (`e3a193e`): P0 quality gates per `QUALITY_PLAN.md` — vitest (79 tests) + strict `tsc` + `eslint .` + prettier + husky/lint-staged + CI; `typecheck`/`lint`/`format:check`/`test`/`build` all green
+- [x] 2026-09-11 (`8ec651d`): P2 per `QUALITY_PLAN.md` — Playwright e2e 4/4 + CI job, rate limits + logging, Dependabot + audit gate, `TESTING.md`; unit suite now 92/92
 - [ ] Update this doc with deviations
 
-Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue — since flipped back to `false` once `eslint .` flat config landed 2026-09-11); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`); quality tooling 2026-09-11 (`e3a193e`): `vitest@5` + `@vitest/coverage-v8`, `typescript-eslint@8` + `eslint-plugin-react-hooks`, `prettier@3`, `husky@9` + `lint-staged`, `.github/workflows/ci.yml`, `vitest.config.ts`, `tests/` + `tests/fixtures/`.
+Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue — since flipped back to `false` once `eslint .` flat config landed 2026-09-11); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`); quality tooling 2026-09-11 (`e3a193e`): `vitest@5` + `@vitest/coverage-v8`, `typescript-eslint@8` + `eslint-plugin-react-hooks`, `prettier@3`, `husky@9` + `lint-staged`, `.github/workflows/ci.yml`, `vitest.config.ts`, `tests/` + `tests/fixtures/`; P2 2026-09-11 (`8ec651d`): `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `lib/rate-limit.ts` + `tests/rate-limit.test.ts`, `.github/dependabot.yml`, audit + e2e CI jobs, `TESTING.md`.
 
 ## 11. Risks
 
