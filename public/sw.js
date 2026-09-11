@@ -78,6 +78,34 @@ async function networkFirst(request, fallback) {
   }
 }
 
+/**
+ * Prefetch a document's static assets (`/_next/static/...` CSS/JS) so pages
+ * cached without ever being rendered — e.g. via proactive warming — still
+ * have their stylesheets offline. Best effort; never blocks the response.
+ */
+async function warmDocumentAssets(response, origin) {
+  try {
+    const contentType = response.headers ? response.headers.get("content-type") : "";
+    if (contentType && !contentType.includes("text/html")) return;
+    const html = await response.clone().text();
+    const urls = [
+      ...new Set(Array.from(html.matchAll(/\/_next\/static\/[A-Za-z0-9._\-/]+/g), (m) => m[0])),
+    ].slice(0, 50);
+    if (!urls.length) return;
+    const cache = await caches.open(CACHE);
+    await Promise.allSettled(
+      urls.map(async (pathname) => {
+        const req = new Request(origin + pathname);
+        if (await cache.match(req)) return;
+        const res = await fetch(req);
+        if (res.ok) await cache.put(req, res);
+      })
+    );
+  } catch {
+    // best effort only
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -100,7 +128,10 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, OFFLINE_URL));
+    const page = networkFirst(request, OFFLINE_URL);
+    // Keep the worker alive until the document's assets are prefetched.
+    event.waitUntil(page.then((res) => warmDocumentAssets(res, url.origin)).catch(() => undefined));
+    event.respondWith(page);
     return;
   }
 

@@ -106,6 +106,10 @@ test("library warming caches unopened articles for offline", async ({ page, requ
     const articleRes = await page.goto(`/a/${saved.id}`);
     expect(articleRes?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
+    // Styles must survive offline too (globals.css sets Georgia on body).
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(
+      "Georgia"
+    );
   } finally {
     await context.setOffline(false);
   }
