@@ -48,13 +48,26 @@ function isStaticAsset(pathname) {
   );
 }
 
+// Static assets carry volatile query strings in dev (`?v=` timestamps that
+// change on every server restart). Strip them for cache keys so a reboot
+// doesn't orphan cached CSS/JS. Prod hashes live in filenames, so this is
+// safe there too.
+function cacheKey(request) {
+  const url = new URL(request.url);
+  if (url.origin === self.location.origin && url.pathname.startsWith("/_next/static/")) {
+    return new Request(url.origin + url.pathname, { method: request.method });
+  }
+  return request;
+}
+
 async function cacheFirst(request) {
-  const cached = await caches.match(request);
+  const key = cacheKey(request);
+  const cached = await caches.match(key);
   if (cached) return cached;
   const res = await fetch(request);
   if (res.ok) {
     const copy = res.clone();
-    caches.open(CACHE).then((cache) => cache.put(request, copy));
+    caches.open(CACHE).then((cache) => cache.put(key, copy));
   }
   return res;
 }
@@ -96,9 +109,10 @@ async function warmDocumentAssets(response, origin) {
     await Promise.allSettled(
       urls.map(async (pathname) => {
         const req = new Request(origin + pathname);
-        if (await cache.match(req)) return;
+        const key = cacheKey(req);
+        if (await cache.match(key)) return;
         const res = await fetch(req);
-        if (res.ok) await cache.put(req, res);
+        if (res.ok) await cache.put(key, res);
       })
     );
   } catch {
@@ -127,13 +141,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (request.mode === "navigate") {
-    const page = networkFirst(request, OFFLINE_URL);
-    // Keep the worker alive until the document's assets are prefetched.
-    event.waitUntil(page.then((res) => warmDocumentAssets(res, url.origin)).catch(() => undefined));
-    event.respondWith(page);
-    return;
-  }
-
-  event.respondWith(networkFirst(request));
+  // Documents (full navigations AND same-origin fetches like the offline
+  // warmer's) get their static assets prefetched so unrendered pages keep
+  // their CSS offline. Non-HTML (RSC flight data, JSON) is skipped inside.
+  const page = networkFirst(request, request.mode === "navigate" ? OFFLINE_URL : undefined);
+  // Keep the worker alive until the document's assets are prefetched.
+  event.waitUntil(page.then((res) => warmDocumentAssets(res, url.origin)).catch(() => undefined));
+  event.respondWith(page);
 });
