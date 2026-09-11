@@ -20,6 +20,7 @@ const eslintConfig = [
       ".wrangler/**",
       "coverage/**",
       "next-env.d.ts",
+      "public/sw.js",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
