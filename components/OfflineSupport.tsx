@@ -72,7 +72,7 @@ export default function OfflineSupport() {
   return (
     <p className="muted" role="status" style={{ textAlign: "center", margin: "0.5rem 0 0" }}>
       {!online
-        ? `Offline — ${ready ? `${ready} cached pages ready to read` : "no cached pages yet; reconnect and open the library to cache articles"}. Progress will sync when you reconnect${
+        ? `Offline — ${ready ? `${ready} article${ready === 1 ? "" : "s"} ready to read` : "no articles cached yet; reconnect and open the library to cache them"}. Progress will sync when you reconnect${
             pending ? ` (${pending} pending)` : ""
           }.`
         : `${pending} reading-progress update${pending === 1 ? "" : "s"} pending sync…`}

@@ -48,10 +48,11 @@ describe("offline cache warming", () => {
       "/a/b": ok,
       "/a/c": ok,
     });
-    const { warmed, total } = await warmOfflineCache(fetch, s);
+    const { warmed, total, articles } = await warmOfflineCache(fetch, s);
     expect(total).toBe(3);
+    expect(articles).toBe(3);
     expect(warmed).toBe(4); // home + 3 articles
-    expect(readOfflineReady(s)?.count).toBe(4);
+    expect(readOfflineReady(s)?.count).toBe(3);
     expect(typeof readOfflineReady(s)?.at).toBe("string");
   });
 
@@ -63,24 +64,28 @@ describe("offline cache warming", () => {
       "/a/a": ok,
       "/a/b": new Error("offline mid-warm"),
     });
-    const { warmed, total } = await warmOfflineCache(fetch, s);
+    const { warmed, total, articles } = await warmOfflineCache(fetch, s);
     expect(total).toBe(2);
+    expect(articles).toBe(1); // only a; b failed mid-warm
     expect(warmed).toBe(2); // home + a
+    expect(readOfflineReady(s)?.count).toBe(1);
   });
 
   it("returns zeros when the list fetch fails", async () => {
     const s = memStorage();
     const fetch = stubFetcher({ "/": ok, "/api/articles": new Error("down") });
-    const { warmed, total } = await warmOfflineCache(fetch, s);
+    const { warmed, total, articles } = await warmOfflineCache(fetch, s);
     expect(total).toBe(0);
+    expect(articles).toBe(0);
     expect(warmed).toBe(1); // home still warmed
   });
 
   it("works without storage", async () => {
     const fetch = stubFetcher({ "/": ok, "/api/articles": okJson([]) });
-    const { warmed, total } = await warmOfflineCache(fetch, null);
+    const { warmed, total, articles } = await warmOfflineCache(fetch, null);
     expect(warmed).toBe(1);
     expect(total).toBe(0);
+    expect(articles).toBe(0);
   });
 });
 

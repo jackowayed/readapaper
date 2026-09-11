@@ -81,21 +81,24 @@ export function shouldWarm(
 /**
  * Warm the offline cache: library page first, then every article document.
  * Failures are tolerated per-URL (offline mid-warm keeps what succeeded).
- * Returns { warmed, total } and persists the result for the UI banner.
+ * Returns { warmed, total, articles } and persists the article count for the UI.
+ * (`warmed` includes the library page; the UI only reports `articles` —
+ * nobody cares that a chrome page is cached.)
  */
 export async function warmOfflineCache(
   fetcher: WarmFetcher = defaultFetcher,
   storage: WarmStorage | null = defaultStorage()
-): Promise<{ warmed: number; total: number }> {
+): Promise<{ warmed: number; total: number; articles: number }> {
   let total = 0;
   let warmed = 0;
+  let articles = 0;
   try {
     // Library page first so `/` itself renders offline.
     const home = await fetcher("/");
     if (home.ok) warmed += 1;
 
     const listRes = await fetcher("/api/articles");
-    if (!listRes.ok) return finish(storage, warmed, total);
+    if (!listRes.ok) return finish(storage, warmed, total, articles);
     const list: unknown = await listRes.json();
     const ids = Array.isArray(list)
       ? list
@@ -105,25 +108,27 @@ export async function warmOfflineCache(
     total = ids.length;
 
     const results = await Promise.allSettled(ids.map((id) => fetcher(`/a/${id}`)));
-    warmed += results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+    articles = results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+    warmed += articles;
   } catch {
     // offline mid-warm — keep whatever succeeded
   }
-  return finish(storage, warmed, total);
+  return finish(storage, warmed, total, articles);
 }
 
 function finish(
   storage: WarmStorage | null,
   warmed: number,
-  total: number
-): { warmed: number; total: number } {
+  total: number,
+  articles: number
+): { warmed: number; total: number; articles: number } {
   try {
     storage?.setItem(
       OFFLINE_READY_KEY,
-      JSON.stringify({ count: warmed, at: new Date().toISOString() } satisfies OfflineReady)
+      JSON.stringify({ count: articles, at: new Date().toISOString() } satisfies OfflineReady)
     );
   } catch {
     // storage unavailable — result still returned
   }
-  return { warmed, total };
+  return { warmed, total, articles };
 }

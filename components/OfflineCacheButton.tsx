@@ -5,13 +5,12 @@ import { readOfflineReady, shouldWarm, warmOfflineCache } from "@/lib/offline-ca
 /**
  * Proactive offline control for the library page. Warms the service-worker
  * cache (library + every article document, including unopened ones) once on
- * load while online, and offers a manual refresh. Shows how many pages are
+ * load while online, and offers a manual refresh. Shows how many articles are
  * cached so going offline has no surprises.
  */
 export default function OfflineCacheButton() {
   const [state, setState] = useState<"idle" | "warming" | "ready" | "unsupported">("idle");
-  const [warmed, setWarmed] = useState(0);
-  const [total, setTotal] = useState(0);
+  const [articles, setArticles] = useState(0);
   const ran = useRef(false);
 
   const warm = useCallback(async () => {
@@ -26,9 +25,8 @@ export default function OfflineCacheButton() {
         navigator.serviceWorker.ready,
         new Promise((_, reject) => setTimeout(() => reject(new Error("sw-timeout")), 10000)),
       ]);
-      const { warmed: w, total: t } = await warmOfflineCache();
-      setWarmed(w);
-      setTotal(t);
+      const { articles: n } = await warmOfflineCache();
+      setArticles(n);
       setState("ready");
     } catch {
       setState((s) => (s === "warming" ? "idle" : s));
@@ -38,7 +36,7 @@ export default function OfflineCacheButton() {
   useEffect(() => {
     const prev = readOfflineReady();
     if (prev) {
-      setWarmed(prev.count);
+      setArticles(prev.count);
       setState("ready");
     }
     if (!ran.current && navigator.onLine) {
@@ -54,9 +52,7 @@ export default function OfflineCacheButton() {
     state === "warming"
       ? "Caching for offline…"
       : state === "ready"
-        ? `✓ ${warmed} page${warmed === 1 ? "" : "s"} available offline${
-            total ? ` (${total} articles)` : ""
-          } · Refresh`
+        ? `✓ ${articles} article${articles === 1 ? "" : "s"} available offline · Refresh`
         : "↓ Make available offline";
 
   return (
