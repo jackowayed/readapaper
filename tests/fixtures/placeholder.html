@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Placeholder Images Are Dropped</title>
+    <meta name="author" content="Jane Reporter" />
+  </head>
+  <body>
+    <article>
+      <h1>Placeholder Images Are Dropped</h1>
+      <p>
+        Tracking pixels and half-loaded placeholders should never reach the reader view. Data URIs
+        and blob addresses carry no retrievable image, so the extractor removes them.
+      </p>
+      <p>
+        Researchers have spent decades trying to understand how people read long articles on
+        screens. A new line of work suggests that typography, line length, and image placement each
+        play a measurable role in comprehension.
+      </p>
+      <img
+        src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+        alt="1px tracker"
+      />
+      <p>
+        In the latest experiment, volunteers read the same essay set in three different layouts.
+        Readers of the narrow-column version recalled key facts more reliably, while wide columns
+        slowed them down without improving understanding.
+      </p>
+      <img
+        src="blob:https://example.com/550e8400-e29b-41d4-a716-446655440000"
+        alt="unresolved blob"
+      />
+      <p>
+        Images helped when they illustrated the text directly, but decorative pictures hurt recall.
+        The team also found that lazy-loaded figures made no difference to scores as long as they
+        appeared before the reader reached them.
+      </p>
+      <p>
+        The authors caution that the results come from a laboratory setting with motivated
+        volunteers. Still, they argue that publishers can apply the findings today by keeping
+        columns narrow, captions honest, and pages free of clutter.
+      </p>
+    </article>
+  </body>
+</html>

@@ -28,11 +28,21 @@ export default function ThemeControl() {
 
   return (
     <div style={{ display: "flex", gap: "0.4rem" }}>
-      <button onClick={() => setTheme("light")} title="Light">☀</button>
-      <button onClick={() => setTheme("sepia")} title="Sepia">📜</button>
-      <button onClick={() => setTheme("dark")} title="Dark">🌙</button>
-      <button onClick={() => adjustFont(-10)} title="Smaller">A-</button>
-      <button onClick={() => adjustFont(10)} title="Larger">A+</button>
+      <button onClick={() => setTheme("light")} title="Light">
+        ☀
+      </button>
+      <button onClick={() => setTheme("sepia")} title="Sepia">
+        📜
+      </button>
+      <button onClick={() => setTheme("dark")} title="Dark">
+        🌙
+      </button>
+      <button onClick={() => adjustFont(-10)} title="Smaller">
+        A-
+      </button>
+      <button onClick={() => adjustFont(10)} title="Larger">
+        A+
+      </button>
     </div>
   );
 }

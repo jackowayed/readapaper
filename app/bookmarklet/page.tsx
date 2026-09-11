@@ -39,10 +39,9 @@ export default function BookmarkletPage() {
         <h1>Save bookmarklet</h1>
         <p className="muted">
           For paywalled, login-gated, or bot-blocked pages, the server fetch can&apos;t see the
-          article. The bookmarklet runs <strong>inside the page</strong>, grabs the live DOM
-          (with your cookies, rendered JS, and unlocked text), and posts it to{" "}
-          <code>/api/articles</code> where it goes through the normal Readability + sanitize
-          pipeline.
+          article. The bookmarklet runs <strong>inside the page</strong>, grabs the live DOM (with
+          your cookies, rendered JS, and unlocked text), and posts it to <code>/api/articles</code>{" "}
+          where it goes through the normal Readability + sanitize pipeline.
         </p>
 
         <h2>1. Install</h2>
@@ -102,8 +101,8 @@ export default function BookmarkletPage() {
         <h2>Why it beats scraping protection</h2>
         <ul className="muted">
           <li>
-            <strong>No server fetch:</strong> bot/WAF rules see a normal browser, not a scraper
-            IP + headless UA.
+            <strong>No server fetch:</strong> bot/WAF rules see a normal browser, not a scraper IP +
+            headless UA.
           </li>
           <li>
             <strong>Cookies + sessions:</strong> subscriber logins and soft-paywall unlocks travel

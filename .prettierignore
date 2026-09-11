@@ -1,0 +1,11 @@
+.next/
+out/
+build/
+node_modules/
+coverage/
+.next/
+.open-next/
+.wrangler/
+next-env.d.ts
+*.log
+data/*.tmp

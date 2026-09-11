@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Srcset-Only Images Survive Extraction</title>
+    <meta name="author" content="Jane Reporter" />
+  </head>
+  <body>
+    <article>
+      <h1>Srcset-Only Images Survive Extraction</h1>
+      <p>
+        Many publishers ship responsive images with no plain src attribute at all. A reader pipeline
+        that only looks at src will silently drop every figure on the page.
+      </p>
+      <p>
+        Researchers have spent decades trying to understand how people read long articles on
+        screens. A new line of work suggests that typography, line length, and image placement each
+        play a measurable role in comprehension.
+      </p>
+      <p>
+        In the latest experiment, volunteers read the same essay set in three different layouts.
+        Readers of the narrow-column version recalled key facts more reliably, while wide columns
+        slowed them down without improving understanding.
+      </p>
+      <img
+        srcset="/img/small.jpg 400w, /img/medium.jpg 960w, /img/large.jpg 1600w"
+        alt="Srcset demo"
+      />
+      <p>
+        Images helped when they illustrated the text directly, but decorative pictures hurt recall.
+        The team also found that lazy-loaded figures made no difference to scores as long as they
+        appeared before the reader reached them.
+      </p>
+      <p>
+        The authors caution that the results come from a laboratory setting with motivated
+        volunteers. Still, they argue that publishers can apply the findings today by keeping
+        columns narrow, captions honest, and pages free of clutter.
+      </p>
+    </article>
+  </body>
+</html>

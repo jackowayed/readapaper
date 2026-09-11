@@ -23,7 +23,11 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
             Original
           </a>
         </p>
-        {article.excerpt && <p><em>{article.excerpt}</em></p>}
+        {article.excerpt && (
+          <p>
+            <em>{article.excerpt}</em>
+          </p>
+        )}
         <ReaderClient article={article} />
       </main>
     </>

@@ -12,9 +12,25 @@ export type ExtractResult = {
 };
 
 const ALLOWED_TAGS = [
-  "p", "h1", "h2", "h3", "h4", "img", "a", "blockquote",
-  "ul", "ol", "li", "em", "strong", "code", "pre",
-  "figure", "figcaption", "hr", "br",
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "img",
+  "a",
+  "blockquote",
+  "ul",
+  "ol",
+  "li",
+  "em",
+  "strong",
+  "code",
+  "pre",
+  "figure",
+  "figcaption",
+  "hr",
+  "br",
 ];
 const ALLOWED_ATTR = ["href", "src", "alt", "title", "loading", "decoding"];
 
@@ -62,12 +78,12 @@ function pickFromSrcset(srcset: string | null): string | null {
   const withW = candidates.filter((c) => c.w > 0).sort((a, b) => a.w - b.w);
   if (withW.length > 0) {
     // Prefer something around reader-column width (~960px); else largest.
-    const preferred = withW.find((c) => c.w >= 960) ?? withW[withW.length - 1];
+    const preferred = withW.find((c) => c.w >= 960) ?? withW[withW.length - 1]!;
     return preferred.url;
   }
   const withX = candidates.filter((c) => c.x > 0).sort((a, b) => a.x - b.x);
-  if (withX.length > 0) return withX[withX.length - 1].url;
-  return candidates[candidates.length - 1].url;
+  if (withX.length > 0) return withX[withX.length - 1]!.url;
+  return candidates[candidates.length - 1]!.url;
 }
 
 function isPlaceholderSrc(src: string | null): boolean {
@@ -227,6 +243,9 @@ export function extractFromHtml(html: string, baseUrl: string): ExtractResult {
     byline: parsed.byline?.trim() || null,
     excerpt: parsed.excerpt?.trim() || null,
     html: clean,
-    text: (parsed.textContent ?? "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(),
+    text: (parsed.textContent ?? "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
   };
 }

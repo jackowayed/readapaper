@@ -14,8 +14,8 @@ export default async function Home() {
         <h1>Save it. Read it. Listen in sync.</h1>
         <SaveForm />
         <p className="muted">
-          Hit a paywall or bot-block?{" "}
-          <a href="/bookmarklet">Get the bookmarklet</a> — it saves from the live page DOM.
+          Hit a paywall or bot-block? <a href="/bookmarklet">Get the bookmarklet</a> — it saves from
+          the live page DOM.
         </p>
         <h2>Library ({articles.length})</h2>
         <ArticleList articles={articles} />

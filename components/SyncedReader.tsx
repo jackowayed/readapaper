@@ -14,8 +14,7 @@ export default function SyncedReader({ text }: { text: string }) {
   const words = useMemo(() => splitWords(text), [text]);
   const paragraphs = useMemo(() => {
     // group words by blank-line paragraphs so layout mirrors the article
-    const paras: typeof words[] = [];
-    let cur: typeof words = [];
+    const paras: (typeof words)[] = [];
     // walk raw text paragraph splits and bucket words by offset
     const splits: { start: number; end: number }[] = [];
     const re = /\n\s*\n/g;
@@ -31,7 +30,6 @@ export default function SyncedReader({ text }: { text: string }) {
       if (bucket.length) paras.push(bucket);
     }
     if (!paras.length && words.length) paras.push(words);
-    void cur;
     return paras;
   }, [text, words]);
 
@@ -85,7 +83,9 @@ export default function SyncedReader({ text }: { text: string }) {
     const w = words.find((x) => activeOffset >= x.start && activeOffset < x.end);
     const target = w ?? words.filter((x) => x.start <= activeOffset).pop();
     if (!target) return;
-    document.getElementById(`w-${target.start}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    document
+      .getElementById(`w-${target.start}`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeOffset, autoScroll, words]);
 
   const speakSentenceRange = useCallback(
@@ -109,7 +109,7 @@ export default function SyncedReader({ text }: { text: string }) {
           return;
         }
         queueRef.current.idx = idx;
-        const s = sentences[idx];
+        const s = sentences[idx]!;
         const sliceFrom = Math.max(0, charStart - s.start);
         const utterText = sliceFrom > 0 ? s.text.slice(sliceFrom) : s.text;
         const utterStart = charStart > s.start ? charStart : s.start;
@@ -179,7 +179,9 @@ export default function SyncedReader({ text }: { text: string }) {
   }
 
   if (!supported) {
-    return <p className="muted">Text-to-speech is not supported in this browser. Try Chrome or Edge.</p>;
+    return (
+      <p className="muted">Text-to-speech is not supported in this browser. Try Chrome or Edge.</p>
+    );
   }
   if (!sentences.length) {
     return <p className="muted">No readable text for speech.</p>;
@@ -198,7 +200,11 @@ export default function SyncedReader({ text }: { text: string }) {
         </button>
         <label>
           Rate{" "}
-          <select value={rate} onChange={(e) => setRate(Number(e.target.value))} aria-label="Speech rate">
+          <select
+            value={rate}
+            onChange={(e) => setRate(Number(e.target.value))}
+            aria-label="Speech rate"
+          >
             {[0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
               <option key={r} value={r}>
                 {r}x
@@ -208,7 +214,12 @@ export default function SyncedReader({ text }: { text: string }) {
         </label>
         <label>
           Voice{" "}
-          <select value={voiceURI} onChange={(e) => setVoiceURI(e.target.value)} aria-label="Voice" style={{ maxWidth: 220 }}>
+          <select
+            value={voiceURI}
+            onChange={(e) => setVoiceURI(e.target.value)}
+            aria-label="Voice"
+            style={{ maxWidth: 220 }}
+          >
             <option value="">Default</option>
             {voices.map((v) => (
               <option key={v.voiceURI} value={v.voiceURI}>
@@ -218,7 +229,12 @@ export default function SyncedReader({ text }: { text: string }) {
           </select>
         </label>
         <label>
-          <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
+          <input
+            type="checkbox"
+            checked={autoScroll}
+            onChange={(e) => setAutoScroll(e.target.checked)}
+          />{" "}
+          Auto-scroll
         </label>
       </div>
 
@@ -226,8 +242,13 @@ export default function SyncedReader({ text }: { text: string }) {
         {paragraphs.map((para, pi) => (
           <p key={pi}>
             {para.map((w) => {
-              const isActive = activeOffset != null && activeOffset >= w.start && activeOffset < w.end;
-              const inSent = activeSent != null && w.start >= activeSent.start && w.start < activeSent.end && !isActive;
+              const isActive =
+                activeOffset != null && activeOffset >= w.start && activeOffset < w.end;
+              const inSent =
+                activeSent != null &&
+                w.start >= activeSent.start &&
+                w.start < activeSent.end &&
+                !isActive;
               return (
                 <span
                   key={w.start}
@@ -243,7 +264,10 @@ export default function SyncedReader({ text }: { text: string }) {
           </p>
         ))}
       </div>
-      <p className="muted">Tip: click any word to start listening from there. Reading and listening share the same position.</p>
+      <p className="muted">
+        Tip: click any word to start listening from there. Reading and listening share the same
+        position.
+      </p>
     </section>
   );
 }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lazy-Loaded Images Resolve via data-src</title>
+    <meta name="author" content="Jane Reporter" />
+  </head>
+  <body>
+    <article>
+      <h1>Lazy-Loaded Images Resolve via data-src</h1>
+      <p>
+        Lazy loading keeps pages fast by deferring offscreen images. The markup usually carries a
+        tiny placeholder in src and stashes the real address in a data attribute.
+      </p>
+      <p>
+        Researchers have spent decades trying to understand how people read long articles on
+        screens. A new line of work suggests that typography, line length, and image placement each
+        play a measurable role in comprehension.
+      </p>
+      <p>
+        In the latest experiment, volunteers read the same essay set in three different layouts.
+        Readers of the narrow-column version recalled key facts more reliably, while wide columns
+        slowed them down without improving understanding.
+      </p>
+      <img
+        src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+        data-src="/img/lazy-real.jpg"
+        alt="Lazy loaded"
+      />
+      <p>
+        Images helped when they illustrated the text directly, but decorative pictures hurt recall.
+        The team also found that lazy-loaded figures made no difference to scores as long as they
+        appeared before the reader reached them.
+      </p>
+      <p>
+        The authors caution that the results come from a laboratory setting with motivated
+        volunteers. Still, they argue that publishers can apply the findings today by keeping
+        columns narrow, captions honest, and pages free of clutter.
+      </p>
+    </article>
+  </body>
+</html>

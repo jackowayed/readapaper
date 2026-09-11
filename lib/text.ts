@@ -11,7 +11,10 @@ export function splitSentences(text: string): Sentence[] {
       const segText = s.segment;
       if (!segText.trim()) continue;
       // s.index is available in modern runtimes; fall back to search if missing
-      const idx = typeof s.index === "number" ? s.index : text.indexOf(segText, out.length ? out[out.length - 1].end : 0);
+      const idx =
+        typeof s.index === "number"
+          ? s.index
+          : text.indexOf(segText, out.length ? out[out.length - 1]!.end : 0);
       out.push({ text: segText, start: idx, end: idx + segText.length });
     }
     if (out.length) return out;

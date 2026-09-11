@@ -1,6 +1,7 @@
 node_modules/
 .next/
 out/
+coverage/
 .open-next/
 .wrangler/
 data/articles.json
