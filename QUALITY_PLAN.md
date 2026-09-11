@@ -48,12 +48,12 @@ How to use this file: check off boxes as work lands. Keep in sync with `DESIGN.m
 
 ## P2 — E2E + ops hygiene
 
-- [ ] `playwright`: save URL -> list -> read `/a/[id]` -> progress resume -> delete; bookmarklet `POST {url,html}` -> `200/201` flow
-- [ ] Document CORS `*` on `POST /api/articles` (bookmarklet requirement) in `DESIGN.md §5`; add rate-limit (e.g. 30/min/IP) + test
-- [ ] Add `Dependabot` + `npm audit` in CI; pin `next/react` upgrade policy
-- [ ] Add minimal observability: `console.error` with route + url host on `422/500`, Sentry TODO per `DESIGN.md §9 Ops`
-- [ ] Add `TESTING.md` snippet or README section: `npm test`, `npx playwright test`, how to add fixtures
-- [ ] Acceptance: `npx playwright test` green in CI; `DESIGN.md §9 Ops` E2E item checked off
+- [x] `playwright`: save URL -> list -> read `/a/[id]` -> progress resume -> delete; bookmarklet `POST {url,html}` -> `200/201` flow
+- [x] Document CORS `*` on `POST /api/articles` (bookmarklet requirement) in `DESIGN.md §4`; add rate-limit (30/min/IP on both POSTs) + test
+- [x] Add `Dependabot` + `npm audit` in CI (`critical` gate — 1 high from postcss-via-Next needs a breaking Next major; tighten to `high` after upgrade); `next`/`react` pin decision still open (see follow-ups)
+- [x] Add minimal observability: `console.error` with route + url host on `422/500`, Sentry TODO per `DESIGN.md §9 Ops`
+- [x] Add `TESTING.md`: `npm test`, `npx playwright test`, fixtures, gates
+- [x] Acceptance: `npm run test:e2e` green locally (4/4, CI runs it as a separate job); `DESIGN.md §9 Ops` E2E item checked off
 
 ## Commands (target state)
 
@@ -70,3 +70,4 @@ npx playwright test   # e2e
 
 - [x] 2026-09-11: plan created — no code changed, `DESIGN.md` sync N/A (docs-only).
 - [x] 2026-09-11: P0 done — 79/79 vitest pass (~95% stmts on `lib/`), typecheck/lint/format/build green, CI added. Verified: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`. Remaining: branch protection (repo settings), P1 SSRF-redirect + store mutex/zod, P2 Playwright/rate-limit/Dependabot. Note: `target=_blank` set in `absolutizeUrls` is stripped by DOMPurify allowlist — decide to allowlist or remove (see P1).
+- [x] 2026-09-11: P2 done — Playwright e2e 4/4 green locally + separate CI job, 30 req/min/IP limits on both POSTs (13 unit tests), `console.error` host-only logging, Dependabot weekly + `npm audit --audit-level=critical` in CI, `TESTING.md`. Verified: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` (92/92), `npm run build`, `npm run test:e2e` (4/4). Remaining: branch protection (repo settings), P1 SSRF-redirect + store mutex/zod, Next 16 + readability 0.6.0 upgrades (1 high audit finding), `next`/`react` pin decision.

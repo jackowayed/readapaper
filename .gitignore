@@ -2,6 +2,7 @@ node_modules/
 .next/
 out/
 coverage/
+test-results/
 .open-next/
 .wrangler/
 data/articles.json

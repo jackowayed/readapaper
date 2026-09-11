@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createArticle, listArticles, toSummary } from "@/lib/store";
 import { extractFromHtml, extractFromUrl } from "@/lib/extract";
+import {
+  checkRateLimit,
+  DEFAULT_RATE_LIMIT,
+  DEFAULT_RATE_WINDOW_MS,
+  getClientIp,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +22,16 @@ function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status, headers: CORS_HEADERS });
 }
 
+/** Host only (never full URL/body) for error logs; "unknown" when unparseable. */
+function safeHost(raw: unknown): string {
+  if (typeof raw !== "string" || !raw) return "unknown";
+  try {
+    return new URL(raw).hostname || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -26,6 +42,16 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const rl = checkRateLimit(
+    `articles:${getClientIp(req)}`,
+    DEFAULT_RATE_LIMIT,
+    DEFAULT_RATE_WINDOW_MS
+  );
+  if (!rl.ok) {
+    const res = json({ error: "Rate limited, retry soon" }, 429);
+    res.headers.set("Retry-After", String(rl.retryAfterSec));
+    return res;
+  }
   let body: { url?: string; html?: string };
   try {
     body = await req.json();
@@ -38,6 +64,9 @@ export async function POST(req: Request) {
       // blocked pages). Runs in the page's DOM so it carries cookies, rendered
       // JS, and paywall-unlocked text the server fetch can't see.
       if (body.html.length > 10_000_000) {
+        console.error(
+          `[POST /api/articles] html too large host=${safeHost(body.url)} bytes=${body.html.length}`
+        );
         return json({ error: "Page HTML too large (>10MB)" }, 422);
       }
       const base = typeof body.url === "string" && body.url ? body.url : "https://localhost/";
@@ -54,6 +83,9 @@ export async function POST(req: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Save failed";
     const status = /Invalid|Only http|Blocked/.test(msg) ? 400 : 422;
+    if (status === 422 || status >= 500) {
+      console.error(`[POST /api/articles] save failed host=${safeHost(body.url)} err=${msg}`);
+    }
     return json({ error: msg }, status);
   }
 }

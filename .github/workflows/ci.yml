@@ -27,3 +27,26 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Audit
+        # Baseline (2026-09-11) has 1 high (postcss via next, fix needs a
+        # breaking Next major) so `high` fails; gate on `critical` until the
+        # Next upgrade lands. See QUALITY_PLAN.md P2 follow-ups.
+        run: npm audit --audit-level=critical
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install dependencies
+        run: npm ci || (sleep 30 && npm ci)
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        run: npm run build
+      - name: Run e2e tests
+        run: npm run test:e2e
