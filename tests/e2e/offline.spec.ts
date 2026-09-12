@@ -102,11 +102,16 @@ test("library warming caches unopened articles for offline", async ({ page, requ
     timeout: 20000,
   });
 
-  // Cut the network and open the never-visited article.
+  // Cut the network and open the never-visited article the way a user
+  // would: clicking its library link. The client-side navigation falls
+  // back to the warmed document when the RSC request cannot reach the
+  // network. (A direct page.goto for a never-visited document is flaky
+  // under headless Chromium offline emulation: the navigation intermittently
+  // never reaches the service worker and resolves null.)
   await context.setOffline(true);
   try {
-    const articleRes = await page.goto(`/a/${saved.id}`);
-    expect(articleRes?.status()).toBe(200);
+    await page.locator(`a[href="/a/${saved.id}"]`).click();
+    await expect(page).toHaveURL(`/a/${saved.id}`);
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
     // Styles must survive offline too (globals.css sets Georgia on body).
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(

@@ -21,10 +21,30 @@ export default function OfflineCacheButton() {
     setState("warming");
     try {
       // Wait for the worker to take control so these requests get cached.
+      // `ready` alone is not enough: it resolves at activation, which can
+      // win the race against clients.claim(), leaving this page
+      // uncontrolled — its fetches would then succeed over the network
+      // without landing in any cache. Poll controller explicitly.
       await Promise.race([
         navigator.serviceWorker.ready,
         new Promise((_, reject) => setTimeout(() => reject(new Error("sw-timeout")), 10000)),
       ]);
+      const controlled =
+        navigator.serviceWorker.controller !== null ||
+        (await Promise.race([
+          new Promise<boolean>((resolve) => {
+            const onChange = () => {
+              navigator.serviceWorker.removeEventListener("controllerchange", onChange);
+              resolve(true);
+            };
+            navigator.serviceWorker.addEventListener("controllerchange", onChange);
+          }),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10000)),
+        ]));
+      if (!controlled) {
+        setState((s) => (s === "warming" ? "idle" : s));
+        return;
+      }
       const { articles: n } = await warmOfflineCache();
       setArticles(n);
       setState("ready");
