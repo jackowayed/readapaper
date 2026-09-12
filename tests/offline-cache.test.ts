@@ -39,11 +39,11 @@ describe("offline cache warming", () => {
     expect(readOfflineReady(null)).toBeNull();
   });
 
-  it("warms home + every article and persists the count", async () => {
+  it("warms home + every active article and persists the count", async () => {
     const s = memStorage();
     const fetch = stubFetcher({
       "/": ok,
-      "/api/articles": okJson([{ id: "a" }, { id: "b" }, { id: "c" }]),
+      "/api/articles?archived=0": okJson([{ id: "a" }, { id: "b" }, { id: "c" }]),
       "/a/a": ok,
       "/a/b": ok,
       "/a/c": ok,
@@ -60,7 +60,7 @@ describe("offline cache warming", () => {
     const s = memStorage();
     const fetch = stubFetcher({
       "/": ok,
-      "/api/articles": okJson([{ id: "a" }, { id: 42 }, {}, { id: "b" }]),
+      "/api/articles?archived=0": okJson([{ id: "a" }, { id: 42 }, {}, { id: "b" }]),
       "/a/a": ok,
       "/a/b": new Error("offline mid-warm"),
     });
@@ -71,9 +71,22 @@ describe("offline cache warming", () => {
     expect(readOfflineReady(s)?.count).toBe(1);
   });
 
+  it("requests the active-only list so archived articles stay out of the cache", async () => {
+    const s = memStorage();
+    const seen: string[] = [];
+    const fetch = async (url: string): Promise<StubRes> => {
+      seen.push(url);
+      if (url === "/") return ok;
+      return okJson([]);
+    };
+    await warmOfflineCache(fetch, s);
+    expect(seen).toContain("/api/articles?archived=0");
+    expect(seen).not.toContain("/api/articles");
+  });
+
   it("returns zeros when the list fetch fails", async () => {
     const s = memStorage();
-    const fetch = stubFetcher({ "/": ok, "/api/articles": new Error("down") });
+    const fetch = stubFetcher({ "/": ok, "/api/articles?archived=0": new Error("down") });
     const { warmed, total, articles } = await warmOfflineCache(fetch, s);
     expect(total).toBe(0);
     expect(articles).toBe(0);
@@ -81,7 +94,7 @@ describe("offline cache warming", () => {
   });
 
   it("works without storage", async () => {
-    const fetch = stubFetcher({ "/": ok, "/api/articles": okJson([]) });
+    const fetch = stubFetcher({ "/": ok, "/api/articles?archived=0": okJson([]) });
     const { warmed, total, articles } = await warmOfflineCache(fetch, null);
     expect(warmed).toBe(1);
     expect(total).toBe(0);

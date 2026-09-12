@@ -97,7 +97,8 @@ export async function warmOfflineCache(
     const home = await fetcher("/");
     if (home.ok) warmed += 1;
 
-    const listRes = await fetcher("/api/articles");
+    // Active articles only: archived items stay out of the offline cache.
+    const listRes = await fetcher("/api/articles?archived=0");
     if (!listRes.ok) return finish(storage, warmed, total, articles);
     const list: unknown = await listRes.json();
     const ids = Array.isArray(list)
