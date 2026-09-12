@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { persistProgress } from "@/lib/offline-queue";
+import { fractionToOffset } from "@/lib/progress-sync";
 
 export default function ThemeControl() {
   useEffect(() => {
@@ -49,7 +50,28 @@ export default function ThemeControl() {
 }
 
 // Hook: persist + restore reading progress for an article.
-export function useReadingProgress(articleId: string, initial: number) {
+//
+// Offset mode (unified progress): pass `textLength` + `onPosition` and the
+// hook converts the scroll fraction to a canonical char offset, handing it to
+// the owner via `onPosition` — the owner (ReaderClient) persists through the
+// shared offline-safe sender, so read + listen share one write path. Without
+// `onPosition` the hook keeps its legacy behavior (persists `{ progress }`
+// itself). `enabled` gates the scroll listener so only read mode persists.
+export type ReadingProgressOptions = {
+  textLength?: number;
+  enabled?: boolean;
+  onPosition?: (offset: number) => void;
+};
+
+export function useReadingProgress(
+  articleId: string,
+  initial: number,
+  opts?: ReadingProgressOptions
+) {
+  const textLength = opts?.textLength;
+  const enabled = opts?.enabled ?? true;
+  const onPositionRef = useRef<((offset: number) => void) | undefined>(undefined);
+  onPositionRef.current = opts?.onPosition;
   const saved = useRef(false);
   useEffect(() => {
     if (!saved.current && initial > 0 && initial < 0.95) {
@@ -59,16 +81,34 @@ export function useReadingProgress(articleId: string, initial: number) {
     }
   }, [initial]);
 
+  // Ignore scroll events for ~1s after a listen-driven handoff: toggling
+  // listen -> read flips `enabled` false -> true and scrolls programmatically
+  // to the listen offset; that scroll must not fight or re-persist.
+  const suppressUntilRef = useRef(0);
+  const wasEnabledRef = useRef(enabled);
   useEffect(() => {
+    if (enabled && !wasEnabledRef.current) suppressUntilRef.current = Date.now() + 1000;
+    wasEnabledRef.current = enabled;
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
     let t: ReturnType<typeof setTimeout> | null = null;
     function onScroll() {
       if (t) return;
       t = setTimeout(() => {
         t = null;
+        if (document.hidden) return;
+        if (Date.now() < suppressUntilRef.current) return;
         const h = document.documentElement.scrollHeight - window.innerHeight;
         if (h <= 0) return;
         const p = Math.min(1, Math.max(0, window.scrollY / h));
-        // Offline-safe: queues in localStorage and replays on reconnect.
+        const notify = onPositionRef.current;
+        if (notify && typeof textLength === "number" && Number.isFinite(textLength)) {
+          notify(fractionToOffset(p, textLength));
+          return;
+        }
+        // Legacy path (no owner): persist the fraction directly, offline-safe.
         persistProgress(articleId, p, async (id, progress) =>
           fetch(`/api/articles/${id}/progress`, {
             method: "PUT",
@@ -80,5 +120,5 @@ export function useReadingProgress(articleId: string, initial: number) {
     }
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, [articleId]);
+  }, [articleId, enabled, textLength]);
 }

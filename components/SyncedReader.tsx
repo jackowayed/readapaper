@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSentences, splitWords } from "@/lib/text";
+import { clampOffset } from "@/lib/progress-sync";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
 
 /**
@@ -10,8 +11,22 @@ import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
  * - Highlights current word via onboundary charIndex + auto-scrolls.
  * - Click any word to seek. Firefox lacks word boundaries -> sentence fallback.
  * - Media Session API: lock-screen / background play/pause/stop controls.
+ * - Unified progress: starts highlighting at `startOffset` (silent restore, no
+ *   autoplay) and reports the playhead via `onPosition` — throttled to ~2s
+ *   during playback, flushed on pause/stop/unmount/hide. The owner persists
+ *   through the shared offline-safe sender.
  */
-export default function SyncedReader({ text, title }: { text: string; title?: string }) {
+export default function SyncedReader({
+  text,
+  title,
+  startOffset,
+  onPosition,
+}: {
+  text: string;
+  title?: string;
+  startOffset?: number;
+  onPosition?: (offset: number) => void;
+}) {
   const sentences = useMemo(() => splitSentences(text), [text]);
   const words = useMemo(() => splitWords(text), [text]);
   const paragraphs = useMemo(() => {
@@ -40,7 +55,9 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
   const [voiceURI, setVoiceURI] = useState<string>("");
   const [rate, setRate] = useState(1);
   const [playing, setPlaying] = useState(false);
-  const [activeOffset, setActiveOffset] = useState<number | null>(null);
+  const [activeOffset, setActiveOffset] = useState<number | null>(() =>
+    clampOffset(startOffset ?? 0, text.length)
+  );
   const [activeSentence, setActiveSentence] = useState<number | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -50,6 +67,50 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
   const pauseUntilRef = useRef(0);
   const activeOffsetRef = useRef<number | null>(null);
   activeOffsetRef.current = activeOffset;
+
+  // Throttled playhead reporting: boundary ticks update local highlight
+  // immediately, but `onPosition` fires at most every ~2s; pause/stop/unmount/
+  // hide always flush the latest offset.
+  const onPositionRef = useRef(onPosition);
+  onPositionRef.current = onPosition;
+  const lastSentRef = useRef<number | null>(null);
+  const lastSentAtRef = useRef(0);
+  const pendingRef = useRef<number | null>(null);
+
+  const reportPosition = useCallback((offset: number, force = false) => {
+    pendingRef.current = offset;
+    const send = onPositionRef.current;
+    if (!send) return;
+    const now = Date.now();
+    if (!force && offset === lastSentRef.current) return;
+    if (!force && now - lastSentAtRef.current < 2000) return;
+    lastSentRef.current = offset;
+    lastSentAtRef.current = now;
+    send(offset);
+  }, []);
+
+  const flushPosition = useCallback(() => {
+    const pending = pendingRef.current;
+    const send = onPositionRef.current;
+    if (send == null || pending == null || pending === lastSentRef.current) return;
+    lastSentRef.current = pending;
+    lastSentAtRef.current = Date.now();
+    send(pending);
+  }, []);
+
+  // Flush the latest playhead on hide + unmount (silent, no UI).
+  const flushRef = useRef(flushPosition);
+  flushRef.current = flushPosition;
+  useEffect(() => {
+    function onVis() {
+      if (document.hidden) flushRef.current();
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      flushRef.current();
+    };
+  }, []);
 
   useEffect(() => {
     if (!supported) return;
@@ -78,17 +139,24 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
     };
   }, []);
 
+  // Word shown as active for a playhead offset: the containing word, or —
+  // when the offset lands on inter-word whitespace — the nearest preceding
+  // word (same fallback as auto-scroll, so restore always highlights).
+  const activeWordStart = useMemo(() => {
+    if (activeOffset == null) return null;
+    const exact = words.find((x) => activeOffset >= x.start && activeOffset < x.end);
+    if (exact) return exact.start;
+    return words.filter((x) => x.start <= activeOffset).pop()?.start ?? null;
+  }, [activeOffset, words]);
+
   // Auto-scroll to active word
   useEffect(() => {
-    if (activeOffset == null || !autoScroll) return;
+    if (activeWordStart == null || !autoScroll) return;
     if (Date.now() < pauseUntilRef.current) return;
-    const w = words.find((x) => activeOffset >= x.start && activeOffset < x.end);
-    const target = w ?? words.filter((x) => x.start <= activeOffset).pop();
-    if (!target) return;
     document
-      .getElementById(`w-${target.start}`)
+      .getElementById(`w-${activeWordStart}`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [activeOffset, autoScroll, words]);
+  }, [activeWordStart, autoScroll]);
 
   const speakSentenceRange = useCallback(
     (fromOffset: number) => {
@@ -127,6 +195,7 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
           const rel = typeof e.charIndex === "number" ? e.charIndex : 0;
           const global = utterStart + rel;
           setActiveOffset(global);
+          reportPosition(global);
           const sIdx = sentences.findIndex((x) => global >= x.start && global < x.end);
           if (sIdx !== -1) setActiveSentence(sIdx);
         };
@@ -138,11 +207,12 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
         synth.speak(u);
         // Sentence-level fallback highlight (Firefox has no word events)
         setActiveOffset(utterStart);
+        reportPosition(utterStart);
       };
 
       speakIdx(startIdx, fromOffset);
     },
-    [sentences, supported, voices]
+    [sentences, supported, voices, reportPosition]
   );
 
   function onPlayPause() {
@@ -153,6 +223,7 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
       else synth.pause();
       // reflect pause state; speaking continues on resume
       setPlaying(synth.paused ? false : true);
+      flushPosition();
       if (!synth.paused && !synth.speaking) {
         // Chrome dropped the queue while paused -> restart
         speakSentenceRange(activeOffsetRef.current ?? 0);
@@ -172,6 +243,7 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
     queueRef.current.speaking = false;
     window.speechSynthesis.cancel();
     setPlaying(false);
+    flushPosition();
     setActiveOffset(null);
     setActiveSentence(null);
   }
@@ -262,8 +334,7 @@ export default function SyncedReader({ text, title }: { text: string; title?: st
         {paragraphs.map((para, pi) => (
           <p key={pi}>
             {para.map((w) => {
-              const isActive =
-                activeOffset != null && activeOffset >= w.start && activeOffset < w.end;
+              const isActive = activeWordStart != null && w.start === activeWordStart;
               const inSent =
                 activeSent != null &&
                 w.start >= activeSent.start &&
