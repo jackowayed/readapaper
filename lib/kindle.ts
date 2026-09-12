@@ -170,3 +170,84 @@ export async function sendToKindle(
   });
   return { to: config.kindleEmail, count: compiled.count, bytes: compiled.bytes };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 1: SMTP config + mail-sender test override.
+// ---------------------------------------------------------------------------
+
+/** SMTP + Kindle addressing read from env (never logged, never returned to clients). */
+export type KindleSmtpConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  kindleEmail: string;
+  fromEmail: string;
+};
+
+/** Setup hint returned on 503 (and shown in the UI) — no secrets, no stacks. */
+export const KINDLE_SETUP_HINT =
+  "Kindle sending is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS, KINDLE_EMAIL and FROM_EMAIL (see .env.example), approve FROM_EMAIL in Amazon Personal Document Settings, then retry.";
+
+/** Env names required for Kindle sending (port/secure have defaults). */
+const REQUIRED_KINDLE_ENV = ["SMTP_HOST", "SMTP_USER", "SMTP_PASS", "KINDLE_EMAIL", "FROM_EMAIL"];
+
+function readEnv(source: NodeJS.ProcessEnv | undefined, name: string): string | undefined {
+  const raw = source?.[name];
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Read SMTP/Kindle config from env. Returns `null` when any required value
+ * is missing — callers answer 503 with {@link KINDLE_SETUP_HINT}.
+ * `env` defaults to `process.env` (injectable for tests).
+ */
+export function getKindleSmtpConfig(env: NodeJS.ProcessEnv = process.env): KindleSmtpConfig | null {
+  for (const name of REQUIRED_KINDLE_ENV) {
+    if (!readEnv(env, name)) return null;
+  }
+  const portRaw = readEnv(env, "SMTP_PORT");
+  const parsedPort = portRaw !== undefined ? Number.parseInt(portRaw, 10) : 587;
+  const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 587;
+  const secureRaw = readEnv(env, "SMTP_SECURE")?.toLowerCase();
+  const secure = secureRaw === "true" ? true : secureRaw === "false" ? false : port === 465;
+  return {
+    host: readEnv(env, "SMTP_HOST")!,
+    port,
+    secure,
+    user: readEnv(env, "SMTP_USER")!,
+    pass: readEnv(env, "SMTP_PASS")!,
+    kindleEmail: readEnv(env, "KINDLE_EMAIL")!,
+    fromEmail: readEnv(env, "FROM_EMAIL")!,
+  };
+}
+
+/** True when every required Kindle env value is present. */
+export function isKindleConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return getKindleSmtpConfig(env) !== null;
+}
+
+// Test hook mirroring the `setRateLimitOverride` precedent: route/e2e tests
+// inject a fake `KindleSender` via `setMailSenderOverride` so no real SMTP
+// is ever touched. Module scope is intentional — `vi.resetModules`
+// re-imports get a fresh (null) override, and tests can also call
+// `clearMailSenderOverride()` directly.
+let mailSenderOverride: KindleSender | null = null;
+
+/** Test hook: inject a fake sender (or `null` to restore the real transport). */
+export function setMailSenderOverride(sender: KindleSender | null): void {
+  mailSenderOverride = sender;
+}
+
+/** Test hook: drop any override set via `setMailSenderOverride`. */
+export function clearMailSenderOverride(): void {
+  mailSenderOverride = null;
+}
+
+/** Route-internal: the injected fake sender, if any. */
+export function getMailSenderOverride(): KindleSender | null {
+  return mailSenderOverride;
+}
