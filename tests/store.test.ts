@@ -106,10 +106,12 @@ describe("listArticles", () => {
 });
 
 describe("updateProgress", () => {
-  it("sets in-range values", async () => {
+  it("sets in-range values (derived mirror of the canonical offset)", async () => {
     const { article } = await store.createArticle(sample("https://example.com/a"));
     expect(await store.updateProgress(article.id, 0.5)).toBe(true);
-    expect((await store.getArticle(article.id))!.progress).toBe(0.5);
+    // Canonical storage: offset = round(0.5 * len), fraction re-derived.
+    const expected = Math.round(0.5 * article.text.length) / article.text.length;
+    expect((await store.getArticle(article.id))!.progress).toBe(expected);
   });
 
   it("clamps to 0..1", async () => {

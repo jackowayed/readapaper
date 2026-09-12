@@ -8,10 +8,20 @@ export type Article = {
   text: string;
   wordCount: number;
   progress: number;
+  progressOffset: number;
+  progressUpdatedAt: string | null;
   createdAt: string;
 };
 
 export type ArticleSummary = Pick<
   Article,
-  "id" | "url" | "title" | "byline" | "excerpt" | "wordCount" | "progress" | "createdAt"
+  | "id"
+  | "url"
+  | "title"
+  | "byline"
+  | "excerpt"
+  | "wordCount"
+  | "progress"
+  | "progressOffset"
+  | "createdAt"
 >;

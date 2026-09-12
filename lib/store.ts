@@ -3,6 +3,7 @@ import path from "path";
 import { nanoid } from "nanoid";
 import type { Article, ArticleSummary } from "./types";
 import { countWords } from "./text";
+import { clampOffset, fractionToOffset, offsetToFraction } from "./progress-sync";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "articles.json");
@@ -11,7 +12,22 @@ async function readAll(): Promise<Article[]> {
   try {
     const raw = await fs.readFile(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Lazy migration: backfill canonical offset fields for rows written
+    // before unified progress (in-memory only, no rewrite on load).
+    return (parsed as Article[]).map((a) => {
+      const textLength = typeof a.text === "string" ? a.text.length : 0;
+      const progress = typeof a.progress === "number" ? a.progress : 0;
+      const progressOffset =
+        typeof a.progressOffset === "number" && Number.isFinite(a.progressOffset)
+          ? a.progressOffset
+          : clampOffset(Math.round(progress * textLength), textLength);
+      const progressUpdatedAt =
+        typeof a.progressUpdatedAt === "string" || a.progressUpdatedAt === null
+          ? a.progressUpdatedAt
+          : null;
+      return { ...a, progress, progressOffset, progressUpdatedAt };
+    });
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
     throw e;
@@ -26,8 +42,8 @@ async function writeAll(articles: Article[]): Promise<void> {
 }
 
 export function toSummary(a: Article): ArticleSummary {
-  const { id, url, title, byline, excerpt, wordCount, progress, createdAt } = a;
-  return { id, url, title, byline, excerpt, wordCount, progress, createdAt };
+  const { id, url, title, byline, excerpt, wordCount, progress, progressOffset, createdAt } = a;
+  return { id, url, title, byline, excerpt, wordCount, progress, progressOffset, createdAt };
 }
 
 export async function listArticles(): Promise<Article[]> {
@@ -85,6 +101,8 @@ export async function createArticle(input: {
     text: input.text,
     wordCount: countWords(input.text),
     progress: 0,
+    progressOffset: 0,
+    progressUpdatedAt: null,
     createdAt: now,
   };
   all.push(article);
@@ -100,11 +118,32 @@ export async function deleteArticle(id: string): Promise<boolean> {
   return true;
 }
 
-export async function updateProgress(id: string, progress: number): Promise<boolean> {
+/**
+ * Set the canonical char-offset position. Recomputes the derived `progress`
+ * fraction mirror and stamps `progressUpdatedAt`. Returns the updated
+ * `{ offset, progress }`, or `null` when the id is unknown.
+ */
+export async function updateProgressOffset(
+  id: string,
+  offset: number
+): Promise<{ offset: number; progress: number } | null> {
   const all = await readAll();
   const found = all.find((a) => a.id === id);
-  if (!found) return false;
-  found.progress = Math.min(1, Math.max(0, progress));
+  if (!found) return null;
+  const textLength = typeof found.text === "string" ? found.text.length : 0;
+  const clamped = clampOffset(offset, textLength);
+  found.progressOffset = clamped;
+  found.progress = offsetToFraction(clamped, textLength);
+  found.progressUpdatedAt = new Date().toISOString();
   await writeAll(all);
-  return true;
+  return { offset: found.progressOffset, progress: found.progress };
+}
+
+export async function updateProgress(id: string, progress: number): Promise<boolean> {
+  const existing = await getArticle(id);
+  if (!existing) return false;
+  const textLength = typeof existing.text === "string" ? existing.text.length : 0;
+  const offset = fractionToOffset(progress, textLength);
+  const res = await updateProgressOffset(id, offset);
+  return res !== null;
 }
