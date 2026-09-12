@@ -26,7 +26,10 @@ async function readAll(): Promise<Article[]> {
         typeof a.progressUpdatedAt === "string" || a.progressUpdatedAt === null
           ? a.progressUpdatedAt
           : null;
-      return { ...a, progress, progressOffset, progressUpdatedAt };
+      const archived = typeof a.archived === "boolean" ? a.archived : false;
+      const archivedAt =
+        typeof a.archivedAt === "string" || a.archivedAt === null ? a.archivedAt : null;
+      return { ...a, progress, progressOffset, progressUpdatedAt, archived, archivedAt };
     });
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
@@ -42,13 +45,41 @@ async function writeAll(articles: Article[]): Promise<void> {
 }
 
 export function toSummary(a: Article): ArticleSummary {
-  const { id, url, title, byline, excerpt, wordCount, progress, progressOffset, createdAt } = a;
-  return { id, url, title, byline, excerpt, wordCount, progress, progressOffset, createdAt };
+  const {
+    id,
+    url,
+    title,
+    byline,
+    excerpt,
+    wordCount,
+    progress,
+    progressOffset,
+    archived,
+    archivedAt,
+    createdAt,
+  } = a;
+  return {
+    id,
+    url,
+    title,
+    byline,
+    excerpt,
+    wordCount,
+    progress,
+    progressOffset,
+    archived,
+    archivedAt,
+    createdAt,
+  };
 }
 
-export async function listArticles(): Promise<Article[]> {
+export async function listArticles(filter?: { archived?: boolean }): Promise<Article[]> {
   const all = await readAll();
-  return all.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const filtered =
+    filter && typeof filter.archived === "boolean"
+      ? all.filter((a) => a.archived === filter.archived)
+      : all;
+  return filtered.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
 export async function getArticle(id: string): Promise<Article | null> {
@@ -103,6 +134,8 @@ export async function createArticle(input: {
     progress: 0,
     progressOffset: 0,
     progressUpdatedAt: null,
+    archived: false,
+    archivedAt: null,
     createdAt: now,
   };
   all.push(article);
@@ -146,4 +179,18 @@ export async function updateProgress(id: string, progress: number): Promise<bool
   const offset = fractionToOffset(progress, textLength);
   const res = await updateProgressOffset(id, offset);
   return res !== null;
+}
+
+/**
+ * Flip the archived flag, stamping `archivedAt` on archive and clearing it
+ * on unarchive. Returns the updated article, or `null` when unknown.
+ */
+export async function setArchived(id: string, archived: boolean): Promise<Article | null> {
+  const all = await readAll();
+  const found = all.find((a) => a.id === id);
+  if (!found) return null;
+  found.archived = archived;
+  found.archivedAt = archived ? new Date().toISOString() : null;
+  await writeAll(all);
+  return found;
 }

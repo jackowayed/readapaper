@@ -10,6 +10,8 @@ export type Article = {
   progress: number;
   progressOffset: number;
   progressUpdatedAt: string | null;
+  archived: boolean;
+  archivedAt: string | null;
   createdAt: string;
 };
 
@@ -23,5 +25,7 @@ export type ArticleSummary = Pick<
   | "wordCount"
   | "progress"
   | "progressOffset"
+  | "archived"
+  | "archivedAt"
   | "createdAt"
 >;

@@ -36,8 +36,18 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-export async function GET() {
-  const articles = await listArticles();
+export async function GET(req: Request) {
+  const param = new URL(req.url).searchParams.get("archived");
+  if (param === "all") {
+    const articles = await listArticles();
+    return json(articles.map(toSummary));
+  }
+  if (param === "1") {
+    const articles = await listArticles({ archived: true });
+    return json(articles.map(toSummary));
+  }
+  // Default "0" (active-only): missing, "0", or anything else.
+  const articles = await listArticles({ archived: false });
   return json(articles.map(toSummary));
 }
 

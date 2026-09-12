@@ -10,6 +10,7 @@ let tmp = "";
 let articlesRoute: typeof import("../app/api/articles/route");
 let idRoute: typeof import("../app/api/articles/[id]/route");
 let progressRoute: typeof import("../app/api/articles/[id]/progress/route");
+let archiveRoute: typeof import("../app/api/articles/[id]/archive/route");
 
 function fixture(name: string): string {
   return readFileSync(new URL(`./fixtures/${name}.html`, import.meta.url), "utf8");
@@ -36,6 +37,7 @@ beforeEach(async () => {
   articlesRoute = await import("../app/api/articles/route");
   idRoute = await import("../app/api/articles/[id]/route");
   progressRoute = await import("../app/api/articles/[id]/progress/route");
+  archiveRoute = await import("../app/api/articles/[id]/archive/route");
 });
 
 afterEach(async () => {
@@ -113,16 +115,93 @@ describe("POST /api/articles", () => {
 });
 
 describe("GET /api/articles", () => {
+  function getReq(query = ""): Request {
+    return new Request(`http://localhost/api/articles${query}`);
+  }
+
   it("lists article summaries without body fields", async () => {
     await articlesRoute.POST(postReq({ url: "https://example.com/a", html: fixture("simple") }));
-    const res = await articlesRoute.GET();
+    const res = await articlesRoute.GET(getReq());
     expect(res.status).toBe(200);
     const list = (await res.json()) as Record<string, unknown>[];
     expect(list).toHaveLength(1);
     expect(list[0]).toHaveProperty("id");
     expect(list[0]).toHaveProperty("title");
+    expect(list[0]).toHaveProperty("archived", false);
+    expect(list[0]).toHaveProperty("archivedAt", null);
     expect(list[0]).not.toHaveProperty("html");
     expect(list[0]).not.toHaveProperty("text");
+  });
+
+  it("defaults to active-only (archived hidden unless requested)", async () => {
+    const saved = (await (
+      await articlesRoute.POST(postReq({ url: "https://example.com/a", html: fixture("simple") }))
+    ).json()) as { id: string };
+    await archiveRoute.PUT(
+      new Request("http://localhost/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      }),
+      ctx(saved.id)
+    );
+    const def = (await (await articlesRoute.GET(getReq())).json()) as { id: string }[];
+    expect(def).toHaveLength(0);
+    const zero = (await (await articlesRoute.GET(getReq("?archived=0"))).json()) as {
+      id: string;
+    }[];
+    expect(zero).toHaveLength(0);
+    const one = (await (await articlesRoute.GET(getReq("?archived=1"))).json()) as {
+      id: string;
+    }[];
+    expect(one.map((a) => a.id)).toEqual([saved.id]);
+    const all = (await (await articlesRoute.GET(getReq("?archived=all"))).json()) as {
+      id: string;
+    }[];
+    expect(all.map((a) => a.id)).toEqual([saved.id]);
+  });
+});
+
+describe("PUT /api/articles/[id]/archive", () => {
+  async function savedId(url = "https://example.com/a"): Promise<string> {
+    const res = await articlesRoute.POST(postReq({ url, html: fixture("simple") }));
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  function putReq(body: unknown): Request {
+    return new Request("http://localhost/", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+  }
+
+  it("400 on invalid JSON", async () => {
+    const res = await archiveRoute.PUT(putReq("{oops"), ctx("x"));
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when archived is missing or not a boolean", async () => {
+    const id = await savedId();
+    for (const body of [{}, { archived: "yes" }, { archived: 1 }, { archived: null }]) {
+      const res = await archiveRoute.PUT(putReq(body), ctx(id));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("404 for a missing id", async () => {
+    const res = await archiveRoute.PUT(putReq({ archived: true }), ctx("nope"));
+    expect(res.status).toBe(404);
+  });
+
+  it("archives then unarchives, returning {ok:true,archived}", async () => {
+    const id = await savedId();
+    const archived = await archiveRoute.PUT(putReq({ archived: true }), ctx(id));
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toEqual({ ok: true, archived: true });
+    const unarchived = await archiveRoute.PUT(putReq({ archived: false }), ctx(id));
+    expect(unarchived.status).toBe(200);
+    expect(await unarchived.json()).toEqual({ ok: true, archived: false });
   });
 });
 

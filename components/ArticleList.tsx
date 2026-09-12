@@ -12,6 +12,15 @@ export default function ArticleList({ articles }: { articles: ArticleSummary[] }
     router.refresh();
   }
 
+  async function onArchive(id: string, archived: boolean) {
+    await fetch(`/api/articles/${id}/archive`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    });
+    router.refresh();
+  }
+
   if (!articles.length) {
     return <p className="muted">Nothing saved yet. Paste a URL above.</p>;
   }
@@ -32,6 +41,15 @@ export default function ArticleList({ articles }: { articles: ArticleSummary[] }
             <button onClick={() => onDelete(a.id)} aria-label={`Delete ${a.title}`}>
               Delete
             </button>
+            {a.archived ? (
+              <button onClick={() => onArchive(a.id, false)} aria-label={`Unarchive ${a.title}`}>
+                Unarchive
+              </button>
+            ) : (
+              <button onClick={() => onArchive(a.id, true)} aria-label={`Archive ${a.title}`}>
+                Archive
+              </button>
+            )}
           </div>
         </li>
       ))}
