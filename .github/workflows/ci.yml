@@ -17,6 +17,11 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      - name: Ensure npm >= 11.10 (min-release-age support)
+        # Bundled npm on Node 20/22 is 10.x, which silently ignores the
+        # `min-release-age=7` gate in `.npmrc`. Env-var bypass (not a CLI
+        # flag) so npm 10 doesn't choke on the unknown option.
+        run: npm_config_min_release_age=0 npm install -g npm@^11
       - name: Install dependencies
         run: npm ci || (sleep 30 && npm ci)
       - name: Typecheck
@@ -42,6 +47,9 @@ jobs:
         with:
           node-version: 22.x
           cache: npm
+      - name: Ensure npm >= 11.10 (min-release-age support)
+        # See build-test job: bundled npm 10.x silently ignores the gate.
+        run: npm_config_min_release_age=0 npm install -g npm@^11
       - name: Install dependencies
         run: npm ci || (sleep 30 && npm ci)
       - name: Install Playwright chromium

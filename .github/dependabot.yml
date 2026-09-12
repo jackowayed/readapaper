@@ -8,6 +8,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    # PR-time counterpart to the install-time `min-release-age=7` gate in
+    # `.npmrc`: hold automated updates back 7 days so malicious fresh
+    # releases are pulled before Dependabot proposes them.
+    cooldown:
+      default-days: 7
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
