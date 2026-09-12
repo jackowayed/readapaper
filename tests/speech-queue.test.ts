@@ -239,4 +239,43 @@ describe("SpeechQueue driver (mocked speechSynthesis)", () => {
     expect(q2.state.speaking).toBe(false);
     expect(calls[calls.length - 1]).toBe("cancel");
   });
+
+  it("keeps the retry offset on error (no auto-advance after halt)", () => {
+    const calls: string[] = [];
+    const synth = mockSynth(calls);
+    const q = new SpeechQueue({ sentences: SENTENCES, synth });
+    const first = q.start(17); // mid-sentence seek: utterStart 17
+    expect(first?.utterStart).toBe(17);
+    q.handleError();
+    expect(q.state.speaking).toBe(false);
+    // No auto-advance: the queue stays halted until the caller retries.
+    expect(q.handleEnd()).toBeNull();
+    expect(q.handleBoundary(1)).toBeNull();
+    // Retry from the kept offset re-speaks the same sliced sentence.
+    const retry = q.start(17);
+    expect(retry).toEqual({ sentenceIndex: 1, text: "are you? ", utterStart: 17 });
+  });
+
+  it("pause/resume restart predicate drives a start() retry in order", () => {
+    const calls: string[] = [];
+    const synth = mockSynth(calls);
+    const q = new SpeechQueue({ sentences: SENTENCES, synth });
+    q.start(6); // playing mid-sentence 0
+    // Chrome dropped the queue while paused: speaking, neither paused nor speaking.
+    expect(
+      needsRestartAfterPause({
+        queueSpeaking: q.state.speaking,
+        synthPaused: false,
+        synthSpeaking: false,
+      })
+    ).toBe(true);
+    // Restart from the kept playhead re-issues cancel() before speak().
+    const before = calls.length;
+    q.start(6);
+    expect(calls.slice(before, before + 2)).toEqual(["cancel", "speak"]);
+    // Paused synth must NOT restart (resume path instead).
+    expect(
+      needsRestartAfterPause({ queueSpeaking: true, synthPaused: true, synthSpeaking: false })
+    ).toBe(false);
+  });
 });

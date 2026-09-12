@@ -55,6 +55,13 @@ export default function SyncedReader({
   const [voiceURI, setVoiceURI] = useState<string>("");
   const [rate, setRate] = useState(1);
   const [playing, setPlaying] = useState(false);
+  // Audible player state (listen-reliability Phase 1): idle | playing |
+  // paused | error, shown as a status line next to the controls. Silent
+  // position restore + throttled onPosition persist below are unchanged.
+  const [status, setStatus] = useState<"idle" | "playing" | "paused" | "error">("idle");
+  const [speakError, setSpeakError] = useState<string | null>(null);
+  const statusRef = useRef<"idle" | "playing" | "paused" | "error">("idle");
+  statusRef.current = status;
   const [activeOffset, setActiveOffset] = useState<number | null>(() =>
     clampOffset(startOffset ?? 0, text.length)
   );
@@ -162,6 +169,11 @@ export default function SyncedReader({
     (fromOffset: number) => {
       if (!supported) return;
       const synth = window.speechSynthesis;
+      // NOTE (listen-reliability suspect #1): cancel() immediately followed
+      // by speak() is a known Chrome race that can swallow the first
+      // utterance. Phase 0 confirmed the pattern is present but the race did
+      // NOT repro in headless Chromium, so per spec §5 we ship surfacing
+      // only and keep this call order unchanged.
       synth.cancel();
       const { voiceURI: vuri, rate: r } = optsRef.current;
       const voice = voices.find((v) => v.voiceURI === vuri) ?? null;
@@ -170,12 +182,17 @@ export default function SyncedReader({
       if (startIdx === -1) startIdx = 0;
       queueRef.current = { idx: startIdx, speaking: true };
       setPlaying(true);
+      setStatus("playing");
+      setSpeakError(null);
       setActiveSentence(startIdx);
 
       const speakIdx = (idx: number, charStart: number) => {
         if (!queueRef.current.speaking || idx >= sentences.length) {
           queueRef.current.speaking = false;
           setPlaying(false);
+          // Keep an error state sticky: a trailing onend after onerror must
+          // not overwrite it (browsers fire both).
+          if (statusRef.current !== "error") setStatus("idle");
           return;
         }
         queueRef.current.idx = idx;
@@ -199,10 +216,24 @@ export default function SyncedReader({
           const sIdx = sentences.findIndex((x) => global >= x.start && global < x.end);
           if (sIdx !== -1) setActiveSentence(sIdx);
         };
-        u.onend = () => speakIdx(idx + 1, sentences[idx + 1]?.start ?? utterStart);
-        u.onerror = () => {
+        u.onend = () => {
+          // Ignore trailing ends after stop/error so an error stays visible
+          // for retry instead of flipping back to idle.
+          if (!queueRef.current.speaking || statusRef.current === "error") return;
+          speakIdx(idx + 1, sentences[idx + 1]?.start ?? utterStart);
+        };
+        u.onerror = (ev: SpeechSynthesisErrorEvent) => {
           queueRef.current.speaking = false;
           setPlaying(false);
+          // Position (activeOffset) is deliberately kept for retry.
+          const detail =
+            typeof (ev as SpeechSynthesisErrorEvent | undefined)?.error === "string" &&
+            (ev as SpeechSynthesisErrorEvent).error
+              ? `Speech error: ${(ev as SpeechSynthesisErrorEvent).error}`
+              : "Speech error: playback failed";
+          setSpeakError(detail);
+          setStatus("error");
+          flushPosition();
         };
         synth.speak(u);
         // Sentence-level fallback highlight (Firefox has no word events)
@@ -212,7 +243,7 @@ export default function SyncedReader({
 
       speakIdx(startIdx, fromOffset);
     },
-    [sentences, supported, voices, reportPosition]
+    [sentences, supported, voices, reportPosition, flushPosition]
   );
 
   function onPlayPause() {
@@ -222,7 +253,9 @@ export default function SyncedReader({
       if (synth.paused) synth.resume();
       else synth.pause();
       // reflect pause state; speaking continues on resume
-      setPlaying(synth.paused ? false : true);
+      const paused = synth.paused;
+      setPlaying(paused ? false : true);
+      setStatus(paused ? "paused" : "playing");
       flushPosition();
       if (!synth.paused && !synth.speaking) {
         // Chrome dropped the queue while paused -> restart
@@ -233,6 +266,7 @@ export default function SyncedReader({
     if (synth.paused) {
       synth.resume();
       setPlaying(true);
+      setStatus("playing");
       return;
     }
     speakSentenceRange(activeOffsetRef.current ?? 0);
@@ -243,6 +277,8 @@ export default function SyncedReader({
     queueRef.current.speaking = false;
     window.speechSynthesis.cancel();
     setPlaying(false);
+    setStatus("idle");
+    setSpeakError(null);
     flushPosition();
     setActiveOffset(null);
     setActiveSentence(null);
@@ -285,7 +321,7 @@ export default function SyncedReader({
     <section aria-label="Listen in sync">
       <div className="controls">
         <button className="primary" onClick={onPlayPause}>
-          {playing ? "⏸ Pause" : "▶ Listen"}
+          {playing ? "⏸ Pause" : status === "error" ? "↻ Retry" : "▶ Listen"}
         </button>
         <button onClick={onStop} disabled={!playing && activeOffset == null}>
           ⏹ Stop
@@ -328,6 +364,16 @@ export default function SyncedReader({
           />{" "}
           Auto-scroll
         </label>
+        <span role="status" aria-live="polite" data-testid="listen-status" className="muted">
+          Status:{" "}
+          {status === "playing"
+            ? "Playing"
+            : status === "paused"
+              ? "Paused"
+              : status === "error"
+                ? `Error${speakError ? ` — ${speakError}` : ""}`
+                : "Idle"}
+        </span>
       </div>
 
       <div className="listen-text" role="article" aria-label="Sync text">
