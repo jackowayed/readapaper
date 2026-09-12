@@ -82,6 +82,7 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 - `/a/[id]`: narrow column `max-width: 65ch`, serif, H1 + byline + meta, article HTML.
 - Theme toggle: light / sepia / dark (CSS vars + localStorage). Font-size +/-.
 - Progress: `onscroll` throttled 500ms -> PUT progress; on mount restore `scrollTo(progress * scrollHeight)`.
+- Planned: unified char-offset progress (silent restore + seamless handoff) — spec in `docs/unified-progress.md`.
 - `SyncedReader` toolbar: Play/Pause/Stop, rate (0.75–2x), voice select, sentence+word highlight toggle, auto-scroll toggle.
 
 ## 7. Synced TTS design
@@ -165,6 +166,12 @@ data/articles.json         # created at runtime
 - [x] 2026-09-11 (`0276bcf`): offline progress sync + Media Session wiring in reader, offline save guard
 - [x] 2026-09-11 (`74562cb`): proactive offline warming — library + unopened articles cached via `lib/offline-cache.ts` + `OfflineCacheButton`, SW `readapaper-v2`
 - [x] 2026-09-11 (`ca62d69`): Serwist migration — build-time precache + runtime recipes replace hand-rolled SW; e2e on `next start`
+- [ ] Unified progress (plan: `docs/unified-progress.md`) — canonical `progressOffset` char-offset, legacy `progress` fraction as derived mirror; silent restore + seamless Read↔Listen handoff
+  - [ ] Phase 0: `lib/progress-sync.ts` mapping helpers + unit tests
+  - [ ] Phase 1: store `progressOffset`/`progressUpdatedAt` + lazy migration + tests
+  - [ ] Phase 2: `PUT progress` accepts `{offset}`, keeps `{progress}`, returns both + route tests
+  - [ ] Phase 3: offline queue offset support + tests
+  - [ ] Phase 4: ReaderClient ownership + hook/SyncedReader wiring + handoff e2e
 - [ ] Update this doc with deviations
 
 Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue — since flipped back to `false` once `eslint .` flat config landed 2026-09-11); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`); quality tooling 2026-09-11 (`e3a193e`): `vitest@5` + `@vitest/coverage-v8`, `typescript-eslint@8` + `eslint-plugin-react-hooks`, `prettier@3`, `husky@9` + `lint-staged`, `.github/workflows/ci.yml`, `vitest.config.ts`, `tests/` + `tests/fixtures/`; P2 2026-09-11 (`8ec651d`): `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `lib/rate-limit.ts` + `tests/rate-limit.test.ts`, `.github/dependabot.yml`, audit + e2e CI jobs, `TESTING.md`; offline 2026-09-11 (`ecfb3d5`): vanilla `public/sw.js` with no `next-pwa`/Workbox dep (zero-dependency, Cache Storage API directly) — excluded from `eslint .` ignores since Next lint rules don't apply to SW scope; superseded 2026-09-11 (`ca62d69`) by Serwist (`serwist@9` + `@serwist/next@9`, `app/sw.ts` source, generated `public/sw.js` gitignored, `webworker` lib + `@serwist/next/typings` in `tsconfig.json`); e2e webServer switched to `next start` (worker is prod-only).
