@@ -14,6 +14,11 @@ const withSerwist = withSerwistInit({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Isolate `next dev` from prod builds: both default to `.next/` with no
+  // locking, so a `next build` (e.g. for e2e) while dev is running corrupts
+  // dev's incremental cache (dangling vendor-chunk refs -> 500s). `npm run
+  // dev` sets NEXT_DIST_DIR=.next-dev; build/start/e2e keep `.next/`.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   eslint: { ignoreDuringBuilds: false },
   serverExternalPackages: ["jsdom", "@mozilla/readability", "isomorphic-dompurify"],
 };
