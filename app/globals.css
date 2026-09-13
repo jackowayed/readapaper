@@ -58,9 +58,27 @@ body {
   position: relative;
 }
 .menu-button {
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 0.45rem 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  line-height: 0;
+}
+.menu-icon {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: 4px;
+  width: 1.125rem;
+}
+.menu-icon > span {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
 }
 .menu-dropdown {
   position: absolute;

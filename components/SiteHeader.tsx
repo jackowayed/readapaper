@@ -48,7 +48,11 @@ export default function SiteHeader({
           aria-controls="site-menu"
           onClick={() => setOpen((v) => !v)}
         >
-          ☰
+          <span className="menu-icon" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
         </button>
         {open && (
           <div id="site-menu" className="menu-dropdown" role="menu">
