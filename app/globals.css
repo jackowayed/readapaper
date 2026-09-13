@@ -57,6 +57,11 @@ body {
 .menu-wrap {
   position: relative;
 }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 .menu-button {
   display: inline-flex;
   align-items: center;

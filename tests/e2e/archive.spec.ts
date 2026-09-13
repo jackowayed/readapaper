@@ -95,6 +95,35 @@ test("archive -> disappears -> unarchive -> returns", async ({ page, request }) 
   await expect(page.getByRole("button", { name: `Archive ${TITLE}` }).first()).toBeVisible();
 });
 
+test("article page header has archive toggle", async ({ page, request }) => {
+  const html = await fs.readFile(FIXTURE, "utf8");
+  const url = uniqueUrl("e2e-archive-header");
+
+  const post = await request.post("/api/articles", { data: { url, html } });
+  expect(post.status()).toBe(201);
+  const saved = (await post.json()) as { id: string };
+  createdIds.push(saved.id);
+
+  await page.goto(`/a/${saved.id}`);
+  const header = page.locator("header.topbar");
+  // NOTE: exact:true — "Archive <title>" is a substring of "Unarchive <title>".
+  await expect(header.getByRole("button", { name: `Archive ${TITLE}`, exact: true })).toBeVisible();
+
+  await header.getByRole("button", { name: `Archive ${TITLE}`, exact: true }).click();
+  await expect(
+    header.getByRole("button", { name: `Unarchive ${TITLE}`, exact: true })
+  ).toBeVisible();
+
+  let list = (await (await request.get("/api/articles")).json()) as { id: string }[];
+  expect(list.map((a) => a.id)).not.toContain(saved.id);
+
+  await header.getByRole("button", { name: `Unarchive ${TITLE}`, exact: true }).click();
+  await expect(header.getByRole("button", { name: `Archive ${TITLE}`, exact: true })).toBeVisible();
+
+  list = (await (await request.get("/api/articles")).json()) as { id: string }[];
+  expect(list.map((a) => a.id)).toContain(saved.id);
+});
+
 test("archive route validates input", async ({ request }) => {
   const html = await fs.readFile(FIXTURE, "utf8");
   const url = uniqueUrl("e2e-archive-validation");

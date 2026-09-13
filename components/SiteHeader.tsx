@@ -7,10 +7,12 @@ export default function SiteHeader({
   brandLabel,
   brandHref = "/",
   showBookmarkletLink = true,
+  actions,
 }: {
   brandLabel: ReactNode;
   brandHref?: string;
   showBookmarkletLink?: boolean;
+  actions?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -38,35 +40,38 @@ export default function SiteHeader({
       <a className="brand" href={brandHref}>
         {brandLabel}
       </a>
-      <div ref={wrapRef} className="menu-wrap">
-        <button
-          type="button"
-          className="menu-button"
-          aria-label="Menu"
-          aria-haspopup="true"
-          aria-expanded={open}
-          aria-controls="site-menu"
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span className="menu-icon" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-        </button>
-        {open && (
-          <div id="site-menu" className="menu-dropdown" role="menu">
-            {showBookmarkletLink && (
-              <a className="muted menu-link" href="/bookmarklet" role="menuitem">
-                Bookmarklet
-              </a>
-            )}
-            <div className="menu-section">
-              <div className="menu-label">Theme</div>
-              <ThemeControl />
+      <div className="topbar-right">
+        {actions}
+        <div ref={wrapRef} className="menu-wrap">
+          <button
+            type="button"
+            className="menu-button"
+            aria-label="Menu"
+            aria-haspopup="true"
+            aria-expanded={open}
+            aria-controls="site-menu"
+            onClick={() => setOpen((v) => !v)}
+          >
+            <span className="menu-icon" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
+          {open && (
+            <div id="site-menu" className="menu-dropdown" role="menu">
+              {showBookmarkletLink && (
+                <a className="muted menu-link" href="/bookmarklet" role="menuitem">
+                  Bookmarklet
+                </a>
+              )}
+              <div className="menu-section">
+                <div className="menu-label">Theme</div>
+                <ThemeControl />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );

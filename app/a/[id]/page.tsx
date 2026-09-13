@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getArticle } from "@/lib/store";
 import { readingMinutes } from "@/lib/text";
 import SiteHeader from "@/components/SiteHeader";
+import ArchiveButton from "@/components/ArchiveButton";
 import ReaderClient from "@/components/ReaderClient";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,12 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <SiteHeader brandLabel="← Library" />
+      <SiteHeader
+        brandLabel="← Library"
+        actions={
+          <ArchiveButton id={article.id} archived={article.archived} title={article.title} />
+        }
+      />
       <main className="narrow">
         <h1>{article.title}</h1>
         <p className="muted">
