@@ -54,6 +54,47 @@ body {
   text-decoration: none;
   color: var(--fg);
 }
+.menu-wrap {
+  position: relative;
+}
+.menu-button {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.45rem 0.65rem;
+}
+.menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 12rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+}
+.menu-link {
+  text-decoration: none;
+}
+.menu-link:hover {
+  text-decoration: underline;
+}
+.menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.menu-label {
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
 main.narrow {
   max-width: var(--column);
   margin: 0 auto;
