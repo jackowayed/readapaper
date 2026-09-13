@@ -4,6 +4,7 @@ import { splitSentences, splitWords } from "@/lib/text";
 import { clampOffset } from "@/lib/progress-sync";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
 import { nextPlayPauseAction } from "@/lib/speech-queue";
+import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
 
 /**
  * SyncedReader — Web Speech API driver (v0).
@@ -11,10 +12,17 @@ import { nextPlayPauseAction } from "@/lib/speech-queue";
  *   long-utterance cutoff / 15s pause bug).
  * - Highlights current word via onboundary charIndex + auto-scrolls.
  * - Click any word to seek. Firefox lacks word boundaries -> sentence fallback.
- * - Media Session API: lock-screen / background play/pause/stop controls.
+ * - Single Play/Pause toggle (no separate Stop — pausing keeps the position,
+ *   resuming continues from it; click the first word to restart from the top).
+ * - Voice settings (rate + voice) persist per-browser in localStorage
+ *   (offline-safe) and apply immediately: changing them mid-play restarts
+ *   from the current playhead with the new settings; while paused/idle the
+ *   new settings apply to the next resume/start.
+ * - Media Session API: lock-screen play/pause controls (OS-level stop maps
+ *   to pause, keeping the position).
  * - Unified progress: starts highlighting at `startOffset` (silent restore, no
  *   autoplay) and reports the playhead via `onPosition` — throttled to ~2s
- *   during playback, flushed on pause/stop/unmount/hide. The owner persists
+ *   during playback, flushed on pause/unmount/hide. The owner persists
  *   through the shared offline-safe sender.
  */
 export default function SyncedReader({
@@ -53,8 +61,10 @@ export default function SyncedReader({
 
   const [supported] = useState(() => typeof window !== "undefined" && "speechSynthesis" in window);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voiceURI, setVoiceURI] = useState<string>("");
-  const [rate, setRate] = useState(1);
+  // Per-browser memory (localStorage, offline-safe): lazy init so SSR falls
+  // back to defaults without touching window.
+  const [voiceURI, setVoiceURI] = useState<string>(() => loadVoiceSettings().voiceURI);
+  const [rate, setRate] = useState<number>(() => loadVoiceSettings().rate);
   const [playing, setPlaying] = useState(false);
   // Audible player state (listen-reliability Phase 1): idle | playing |
   // paused | error, shown as a status line next to the controls. Silent
@@ -77,7 +87,7 @@ export default function SyncedReader({
   activeOffsetRef.current = activeOffset;
 
   // Throttled playhead reporting: boundary ticks update local highlight
-  // immediately, but `onPosition` fires at most every ~2s; pause/stop/unmount/
+  // immediately, but `onPosition` fires at most every ~2s; pause/unmount/
   // hide always flush the latest offset.
   const onPositionRef = useRef(onPosition);
   onPositionRef.current = onPosition;
@@ -134,6 +144,17 @@ export default function SyncedReader({
     };
   }, [supported]);
 
+  // Stored voice may not exist in this browser (voices are per-device): once
+  // the voice list arrives, fall back to Default instead of a blank select.
+  useEffect(() => {
+    if (!voices.length || !voiceURI) return;
+    if (!voices.some((v) => v.voiceURI === voiceURI)) {
+      setVoiceURI("");
+      saveVoiceSettings({ rate: optsRef.current.rate, voiceURI: "" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voices]);
+
   // Pause auto-scroll briefly when user scrolls manually
   useEffect(() => {
     const pause = () => {
@@ -167,7 +188,7 @@ export default function SyncedReader({
   }, [activeWordStart, autoScroll]);
 
   const speakSentenceRange = useCallback(
-    (fromOffset: number) => {
+    (fromOffset: number, overrides?: { voiceURI?: string; rate?: number }) => {
       if (!supported) return;
       const synth = window.speechSynthesis;
       // NOTE (listen-reliability suspect #1): cancel() immediately followed
@@ -176,7 +197,8 @@ export default function SyncedReader({
       // NOT repro in headless Chromium, so per spec §5 we ship surfacing
       // only and keep this call order unchanged.
       synth.cancel();
-      const { voiceURI: vuri, rate: r } = optsRef.current;
+      const vuri = overrides?.voiceURI ?? optsRef.current.voiceURI;
+      const r = overrides?.rate ?? optsRef.current.rate;
       const voice = voices.find((v) => v.voiceURI === vuri) ?? null;
 
       let startIdx = sentences.findIndex((s) => fromOffset < s.end);
@@ -218,7 +240,7 @@ export default function SyncedReader({
           if (sIdx !== -1) setActiveSentence(sIdx);
         };
         u.onend = () => {
-          // Ignore trailing ends after stop/error so an error stays visible
+          // Ignore trailing ends after pause/error so an error stays visible
           // for retry instead of flipping back to idle.
           if (!queueRef.current.speaking || statusRef.current === "error") return;
           speakIdx(idx + 1, sentences[idx + 1]?.start ?? utterStart);
@@ -282,39 +304,63 @@ export default function SyncedReader({
     speakSentenceRange(activeOffsetRef.current ?? 0);
   }
 
-  function onStop() {
-    if (!supported) return;
-    queueRef.current.speaking = false;
-    window.speechSynthesis.cancel();
-    setPlaying(false);
-    setStatus("idle");
-    setSpeakError(null);
-    flushPosition();
-    setActiveOffset(null);
-    setActiveSentence(null);
-  }
-
   function onSeek(offset: number) {
     speakSentenceRange(offset);
   }
 
-  // Lock-screen / background controls while listening.
+  // Voice settings apply immediately: while playing, restart from the
+  // current playhead with the new settings (same cancel→speak order as a
+  // seek); while paused/idle, persist for the next resume/start.
+  function handleRateChange(next: number) {
+    setRate(next);
+    const voice = optsRef.current.voiceURI;
+    optsRef.current = { voiceURI: voice, rate: next };
+    saveVoiceSettings({ rate: next, voiceURI: voice });
+    if (queueRef.current.speaking && statusRef.current === "playing") {
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: next, voiceURI: voice });
+    }
+  }
+
+  function handleVoiceChange(nextURI: string) {
+    setVoiceURI(nextURI);
+    const r = optsRef.current.rate;
+    optsRef.current = { voiceURI: nextURI, rate: r };
+    saveVoiceSettings({ rate: r, voiceURI: nextURI });
+    if (queueRef.current.speaking && statusRef.current === "playing") {
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, voiceURI: nextURI });
+    }
+  }
+
+  // OS-level stop keeps the position (same as pause) — there is no
+  // destructive reset; the playhead stays highlighted for resume/retry.
+  function pausePlayback() {
+    if (!supported) return;
+    if (!queueRef.current.speaking || statusRef.current !== "playing") return;
+    window.speechSynthesis.pause();
+    setPlaying(false);
+    setStatus("paused");
+    flushPosition();
+  }
+
+  // Lock-screen / background controls while listening or paused (so resume
+  // stays available from the lock screen). Cleared when idle/error/drained.
   const playPauseRef = useRef(onPlayPause);
   playPauseRef.current = onPlayPause;
-  const stopRef = useRef(onStop);
-  stopRef.current = onStop;
+  const pauseRef = useRef(pausePlayback);
+  pauseRef.current = pausePlayback;
   useEffect(() => {
-    if (!playing) {
+    const sessionActive = playing || statusRef.current === "paused";
+    if (!sessionActive) {
       clearMediaSession();
       return;
     }
     setupMediaSession(title ?? "Readapaper", {
       onPlay: () => playPauseRef.current(),
       onPause: () => playPauseRef.current(),
-      onStop: () => stopRef.current(),
+      onStop: () => pauseRef.current(),
     });
     return () => clearMediaSession();
-  }, [playing, title]);
+  }, [playing, status, title]);
 
   if (!supported) {
     return (
@@ -339,14 +385,11 @@ export default function SyncedReader({
                 ? "▶ Resume"
                 : "▶ Listen"}
         </button>
-        <button onClick={onStop} disabled={!playing && activeOffset == null}>
-          ⏹ Stop
-        </button>
         <label>
           Rate{" "}
           <select
             value={rate}
-            onChange={(e) => setRate(Number(e.target.value))}
+            onChange={(e) => handleRateChange(Number(e.target.value))}
             aria-label="Speech rate"
           >
             {[0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
@@ -360,7 +403,7 @@ export default function SyncedReader({
           Voice{" "}
           <select
             value={voiceURI}
-            onChange={(e) => setVoiceURI(e.target.value)}
+            onChange={(e) => handleVoiceChange(e.target.value)}
             aria-label="Voice"
             style={{ maxWidth: 220 }}
           >
@@ -418,8 +461,8 @@ export default function SyncedReader({
         ))}
       </div>
       <p className="muted">
-        Tip: click any word to start listening from there. Reading and listening share the same
-        position.
+        Tip: click any word to start listening from there. Pause keeps your place — press Resume to
+        continue. Reading and listening share the same position.
       </p>
     </section>
   );

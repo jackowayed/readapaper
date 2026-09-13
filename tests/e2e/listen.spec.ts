@@ -238,6 +238,76 @@ test("Listen advances highlight, pause/resume works, position persists on reload
   await expect(page.getByRole("button", { name: /Pause/ })).toHaveCount(0);
 });
 
+test("Voice settings persist per browser, apply immediately, no Stop button", async ({
+  page,
+  request,
+}) => {
+  const { id, title } = await createArticle(request, "voicesettings");
+  // Mock with two fake voices so the Voice select has options.
+  const mockWithVoices = SPEECH_MOCK.replace(
+    "getVoices() { return []; },",
+    `getVoices() { return [{ voiceURI: "mock-voice-1", name: "Mock Voice One", lang: "en-US" }, { voiceURI: "mock-voice-2", name: "Mock Voice Two", lang: "en-GB" }]; },`
+  );
+  await page.addInitScript(mockWithVoices);
+  await page.goto(`/a/${id}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
+
+  // No separate Stop control: single Play/Pause toggle only.
+  await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
+
+  const rateSelect = page.getByLabel("Speech rate");
+  const voiceSelect = page.getByLabel("Voice");
+
+  // Persist rate + voice (localStorage = per-browser, works offline).
+  await rateSelect.selectOption("1.5");
+  await voiceSelect.selectOption("mock-voice-2");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:rate")))
+    .toBe("1.5");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:voiceURI")))
+    .toBe("mock-voice-2");
+
+  // Start playback, then change rate mid-play: restarts from the playhead
+  // (extra cancel) and stays Playing with the new setting applied.
+  await page.getByRole("button", { name: "▶ Listen" }).click();
+  const status = page.getByTestId("listen-status");
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  const cancelsBefore = await page.evaluate(
+    () => (window as unknown as { __mockSpeech: { cancels: number } }).__mockSpeech.cancels
+  );
+  await rateSelect.selectOption("1.25");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () => (window as unknown as { __mockSpeech: { cancels: number } }).__mockSpeech.cancels
+        ),
+      { timeout: 10_000 }
+    )
+    .toBeGreaterThan(cancelsBefore);
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:rate")))
+    .toBe("1.25");
+
+  // Pause keeps the highlight (no destructive stop-reset); reload restores
+  // the saved settings silently with no autoplay and still no Stop.
+  await page.getByRole("button", { name: "⏸ Pause" }).click();
+  await expect(status).toContainText("Paused", { timeout: 10_000 });
+  await expect(page.locator(".listen-text .w.active").first()).toBeVisible({ timeout: 10_000 });
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
+  await expect(rateSelect).toHaveValue("1.25");
+  await expect(voiceSelect).toHaveValue("mock-voice-2");
+  await expect(page.getByTestId("listen-status")).toContainText("Idle");
+  await expect(page.getByRole("button", { name: "▶ Listen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
+});
+
 test("Speech error surfaces with retry and keeps position", async ({ page, request }) => {
   const { id, title } = await createArticle(request, "error");
   await page.addInitScript(SPEECH_MOCK);
