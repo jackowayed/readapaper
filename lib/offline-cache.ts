@@ -18,8 +18,14 @@ export type WarmStorage = {
 };
 
 export const OFFLINE_READY_KEY = "readapaper:offline-ready";
-/** Auto-warm at most this often; the manual button always warms. */
-export const WARM_MAX_AGE_MS = 10 * 60 * 1000;
+/**
+ * Same-tab notification fired (on `window`) after a warm persists its count.
+ * `storage` events only fire in *other* tabs, so components that need to
+ * reflect a warm triggered elsewhere on the same page (e.g. a save warming
+ * the cache while the library button stays mounted through
+ * `router.refresh()`) listen for this instead.
+ */
+export const OFFLINE_READY_EVENT = "readapaper:offline-ready-change";
 
 function defaultStorage(): WarmStorage | null {
   try {
@@ -62,23 +68,6 @@ function defaultFetcher(url: string) {
 }
 
 /**
- * True when no warm has run yet or the last one is older than maxAgeMs.
- * Guards the automatic warm so every library visit doesn't refetch all
- * articles (in dev each render is slow; in prod it's just wasted traffic).
- */
-export function shouldWarm(
-  storage: WarmStorage | null = defaultStorage(),
-  maxAgeMs: number = WARM_MAX_AGE_MS,
-  now: number = Date.now()
-): boolean {
-  const prev = readOfflineReady(storage);
-  if (!prev) return true;
-  const at = Date.parse(prev.at);
-  if (Number.isNaN(at)) return true;
-  return now - at > maxAgeMs;
-}
-
-/**
  * Warm the offline cache: library page first, then every article document.
  * Failures are tolerated per-URL (offline mid-warm keeps what succeeded).
  * Returns { warmed, total, articles } and persists the article count for the UI.
@@ -92,6 +81,10 @@ export async function warmOfflineCache(
   let total = 0;
   let warmed = 0;
   let articles = 0;
+  // Fallback when this warm can't reach the article list (offline mid-warm,
+  // transient failure): report the last good count and leave storage
+  // untouched — a failed warm must not pretend nothing is cached.
+  const fallback = readOfflineReady(storage)?.count ?? 0;
   try {
     // Library page first so `/` itself renders offline.
     const home = await fetcher("/");
@@ -99,7 +92,7 @@ export async function warmOfflineCache(
 
     // Active articles only: archived items stay out of the offline cache.
     const listRes = await fetcher("/api/articles?archived=0");
-    if (!listRes.ok) return finish(storage, warmed, total, articles);
+    if (!listRes.ok) return { warmed, total: fallback, articles: fallback };
     const list: unknown = await listRes.json();
     const ids = Array.isArray(list)
       ? list
@@ -112,7 +105,9 @@ export async function warmOfflineCache(
     articles = results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
     warmed += articles;
   } catch {
-    // offline mid-warm — keep whatever succeeded
+    // Fetch threw (offline mid-warm, …): keep whatever succeeded for `warmed`
+    // but report the last good article count without persisting.
+    return { warmed, total: fallback, articles: fallback };
   }
   return finish(storage, warmed, total, articles);
 }
@@ -128,6 +123,11 @@ function finish(
       OFFLINE_READY_KEY,
       JSON.stringify({ count: articles, at: new Date().toISOString() } satisfies OfflineReady)
     );
+    // Notify same-tab listeners (storage events don't fire in the tab that
+    // wrote). Guarded for SSR / node (unit tests) where window is absent.
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new Event(OFFLINE_READY_EVENT));
+    }
   } catch {
     // storage unavailable — result still returned
   }

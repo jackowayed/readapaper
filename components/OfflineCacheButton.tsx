@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readOfflineReady, shouldWarm, warmOfflineCache } from "@/lib/offline-cache";
+import { OFFLINE_READY_EVENT, readOfflineReady, warmOfflineCache } from "@/lib/offline-cache";
 
 /**
  * Proactive offline control for the library page. Warms the service-worker
- * cache (library + every article document, including unopened ones) once on
+ * cache (library + every article document, including unopened ones) on every
  * load while online, and offers a manual refresh. Shows how many articles are
  * cached so going offline has no surprises.
  */
@@ -13,12 +13,15 @@ export default function OfflineCacheButton() {
   const [articles, setArticles] = useState(0);
   const ran = useRef(false);
 
-  const warm = useCallback(async () => {
+  const warm = useCallback(async (quiet = false) => {
     if (!("serviceWorker" in navigator) || !navigator.onLine) {
       if (!("serviceWorker" in navigator)) setState("unsupported");
       return;
     }
-    setState("warming");
+    // When a previous count is on screen, revalidate silently in the
+    // background so the label never flashes back to "Caching…"; otherwise
+    // show the warming state.
+    if (!quiet) setState("warming");
     try {
       // Wait for the worker to take control so these requests get cached.
       // `ready` alone is not enough: it resolves at activation, which can
@@ -59,11 +62,24 @@ export default function OfflineCacheButton() {
       setArticles(prev.count);
       setState("ready");
     }
+    // Proactive sync: warm on every library load while online (no throttle —
+    // a refresh right after saving must pick up the newest articles). When a
+    // stale count is showing, the warm runs quietly in the background.
     if (!ran.current && navigator.onLine) {
       ran.current = true;
-      // Auto-warm only when stale; the button always forces a refresh.
-      if (shouldWarm()) void warm();
+      void warm(prev !== null);
     }
+    // Same-tab warms triggered elsewhere (e.g. SaveForm warming right after
+    // a save, which doesn't remount this button through router.refresh()).
+    function onReady() {
+      const cur = readOfflineReady();
+      if (cur) {
+        setArticles(cur.count);
+        setState("ready");
+      }
+    }
+    window.addEventListener(OFFLINE_READY_EVENT, onReady);
+    return () => window.removeEventListener(OFFLINE_READY_EVENT, onReady);
   }, [warm]);
 
   if (state === "unsupported") return null;
@@ -77,7 +93,7 @@ export default function OfflineCacheButton() {
 
   return (
     <p className="muted" role="status">
-      <button onClick={() => void warm()} disabled={state === "warming"}>
+      <button onClick={() => void warm(false)} disabled={state === "warming"}>
         {label}
       </button>
     </p>

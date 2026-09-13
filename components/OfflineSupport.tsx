@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { flushPendingProgress, readPendingProgress } from "@/lib/offline-queue";
-import { readOfflineReady } from "@/lib/offline-cache";
+import { OFFLINE_READY_EVENT, readOfflineReady } from "@/lib/offline-cache";
 
 /**
  * Registers /sw.js once, then flushes queued progress writes whenever the
@@ -59,12 +59,19 @@ export default function OfflineSupport() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     window.addEventListener("storage", onStorage);
+    // Same-tab warms (library auto-warm, warm-on-save) don't fire storage
+    // events — follow the explicit notification instead.
+    function onReady() {
+      setReady(readOfflineReady()?.count ?? 0);
+    }
+    window.addEventListener(OFFLINE_READY_EVENT, onReady);
     // Flush once on mount in case we loaded while already online.
     if (navigator.onLine) void flush();
     return () => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(OFFLINE_READY_EVENT, onReady);
     };
   }, []);
 

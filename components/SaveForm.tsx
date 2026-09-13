@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { warmOfflineCache } from "@/lib/offline-cache";
 
 export default function SaveForm() {
   const [url, setUrl] = useState("");
@@ -27,6 +28,11 @@ export default function SaveForm() {
       if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
       setUrl("");
       router.refresh();
+      // Proactive offline sync: the library button stays mounted through
+      // router.refresh(), so warm here — the newly saved article (and the
+      // refreshed library) lands in the service-worker cache immediately,
+      // without waiting for the next full page load.
+      if (navigator.onLine) void warmOfflineCache();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
