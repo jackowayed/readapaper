@@ -124,6 +124,40 @@ export function needsRestartAfterPause(args: {
   return args.queueSpeaking && !args.synthPaused && !args.synthSpeaking;
 }
 
+export type PlayPauseStatus = "idle" | "playing" | "paused" | "error";
+
+export type PlayPauseIntent = "pause" | "resume" | "restart" | "start";
+
+/**
+ * Pure play/pause toggle decision for `SyncedReader.onPlayPause`.
+ *
+ * The previous implementation derived the UI state by reading
+ * `synth.paused` immediately after calling `synth.pause()`/`resume()`.
+ * That read is stale on implementations where the flag flips
+ * asynchronously: pausing kept `playing=true` (button stuck on "Pause")
+ * and resuming could fall through to a full restart. The intent here is
+ * derived from owned state instead — `playing`/`status` decide
+ * pause-vs-resume, and the synth flags are only read (pre-mutation) to
+ * distinguish a resume from a queue-drop restart.
+ */
+export function nextPlayPauseAction(args: {
+  queueSpeaking: boolean;
+  playing: boolean;
+  status: PlayPauseStatus;
+  synthPaused: boolean;
+  synthSpeaking: boolean;
+}): PlayPauseIntent {
+  // Playing -> pause (own state wins over the synth flag).
+  if (args.queueSpeaking && args.playing) return "pause";
+  // Paused with a live queue -> resume, unless the synth queue dropped.
+  if (args.queueSpeaking && args.status === "paused") {
+    if (needsRestartAfterPause(args)) return "restart";
+    return "resume";
+  }
+  // Idle / error / drained queue -> (re)start from the kept offset.
+  return "start";
+}
+
 export type SpeechQueueOptions = {
   sentences: SentenceSpan[];
   synth: QueueSynth;

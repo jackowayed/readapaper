@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSentences, splitWords } from "@/lib/text";
 import { clampOffset } from "@/lib/progress-sync";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
+import { nextPlayPauseAction } from "@/lib/speech-queue";
 
 /**
  * SyncedReader — Web Speech API driver (v0).
@@ -249,26 +250,35 @@ export default function SyncedReader({
   function onPlayPause() {
     if (!supported) return;
     const synth = window.speechSynthesis;
-    if (queueRef.current.speaking && playing) {
-      if (synth.paused) synth.resume();
-      else synth.pause();
-      // reflect pause state; speaking continues on resume
-      const paused = synth.paused;
-      setPlaying(paused ? false : true);
-      setStatus(paused ? "paused" : "playing");
+    // Derive the intent from owned state (playing/status), not from a
+    // post-mutation read of `synth.paused` — that flag can flip
+    // asynchronously, which previously left the button stuck on "Pause"
+    // while the audio was actually paused.
+    const action = nextPlayPauseAction({
+      queueSpeaking: queueRef.current.speaking,
+      playing,
+      status: statusRef.current,
+      synthPaused: synth.paused,
+      synthSpeaking: synth.speaking,
+    });
+    if (action === "pause") {
+      synth.pause();
+      setPlaying(false);
+      setStatus("paused");
       flushPosition();
-      if (!synth.paused && !synth.speaking) {
-        // Chrome dropped the queue while paused -> restart
-        speakSentenceRange(activeOffsetRef.current ?? 0);
-      }
       return;
     }
-    if (synth.paused) {
+    if (action === "resume") {
       synth.resume();
       setPlaying(true);
       setStatus("playing");
       return;
     }
+    // "restart" (Chrome dropped the queue while paused) and "start"
+    // (idle/error/drained) both re-speak from the kept offset. A fresh
+    // cancel→speak also clears a stale synth paused flag, so unlike the
+    // old code there is no resume-only fallback for an idle queue (it
+    // would report Playing while silent).
     speakSentenceRange(activeOffsetRef.current ?? 0);
   }
 
@@ -321,7 +331,13 @@ export default function SyncedReader({
     <section aria-label="Listen in sync">
       <div className="controls">
         <button className="primary" onClick={onPlayPause}>
-          {playing ? "⏸ Pause" : status === "error" ? "↻ Retry" : "▶ Listen"}
+          {playing
+            ? "⏸ Pause"
+            : status === "error"
+              ? "↻ Retry"
+              : status === "paused"
+                ? "▶ Resume"
+                : "▶ Listen"}
         </button>
         <button onClick={onStop} disabled={!playing && activeOffset == null}>
           ⏹ Stop

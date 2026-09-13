@@ -221,7 +221,7 @@ test("Listen advances highlight, pause/resume works, position persists on reload
   expect(saved).toBeLessThanOrEqual(textLength);
 
   // Resume continues from the kept position.
-  await page.getByRole("button", { name: "▶ Listen" }).click();
+  await page.getByRole("button", { name: "▶ Resume" }).click();
   await expect(status).toContainText("Playing", { timeout: 10_000 });
 
   // Reload: silent restore highlights the saved word with no autoplay.

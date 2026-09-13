@@ -4,6 +4,7 @@ import {
   buildUtterance,
   findStartSentence,
   needsRestartAfterPause,
+  nextPlayPauseAction,
   resolveBoundary,
   sliceSentence,
   SpeechQueue,
@@ -151,6 +152,96 @@ describe("needsRestartAfterPause", () => {
     expect(
       needsRestartAfterPause({ queueSpeaking: false, synthPaused: false, synthSpeaking: false })
     ).toBe(false);
+  });
+});
+
+describe("nextPlayPauseAction", () => {
+  it("pauses from owned playing state even when the synth flag is stale", () => {
+    // Regression: the old handler read `synth.paused` right after
+    // `synth.pause()`; on impls where the flag flips async the read stayed
+    // false and the button stuck on "Pause" while audio paused.
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: true,
+        playing: true,
+        status: "playing",
+        synthPaused: false,
+        synthSpeaking: true,
+      })
+    ).toBe("pause");
+    // Even a stale `synthPaused: true` must not flip a pause into a resume.
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: true,
+        playing: true,
+        status: "playing",
+        synthPaused: true,
+        synthSpeaking: true,
+      })
+    ).toBe("pause");
+  });
+
+  it("resumes a paused queue and restarts only on a dropped synth queue", () => {
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: true,
+        playing: false,
+        status: "paused",
+        synthPaused: true,
+        synthSpeaking: true,
+      })
+    ).toBe("resume");
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: true,
+        playing: false,
+        status: "paused",
+        synthPaused: true,
+        synthSpeaking: false,
+      })
+    ).toBe("resume");
+    // Chrome dropped the queue while paused: neither paused nor speaking.
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: true,
+        playing: false,
+        status: "paused",
+        synthPaused: false,
+        synthSpeaking: false,
+      })
+    ).toBe("restart");
+  });
+
+  it("starts fresh from idle/error/drained states", () => {
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: false,
+        playing: false,
+        status: "idle",
+        synthPaused: false,
+        synthSpeaking: false,
+      })
+    ).toBe("start");
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: false,
+        playing: false,
+        status: "error",
+        synthPaused: false,
+        synthSpeaking: false,
+      })
+    ).toBe("start");
+    // Idle queue with a stale synth paused flag restarts audibly instead of
+    // a silent resume with nothing queued.
+    expect(
+      nextPlayPauseAction({
+        queueSpeaking: false,
+        playing: false,
+        status: "idle",
+        synthPaused: true,
+        synthSpeaking: false,
+      })
+    ).toBe("start");
   });
 });
 
