@@ -6,6 +6,11 @@ import SiteHeader from "@/components/SiteHeader";
 export default function BookmarkletPage() {
   const [base, setBase] = useState("");
   const [copied, setCopied] = useState(false);
+  const [manualUrl, setManualUrl] = useState("");
+  const [manualHtml, setManualHtml] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualMsg, setManualMsg] = useState<string | null>(null);
+  const [manualLink, setManualLink] = useState<string | null>(null);
   const linkRef = useRef<HTMLAnchorElement>(null);
 
   const href = base ? buildBookmarklet(base) : "";
@@ -29,6 +34,33 @@ export default function BookmarkletPage() {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // clipboard may be blocked; user can copy manually from the textarea
+    }
+  }
+
+  async function manualSave(e: React.FormEvent) {
+    e.preventDefault();
+    setManualMsg(null);
+    setManualLink(null);
+    if (!manualUrl.trim() || !manualHtml.trim()) {
+      setManualMsg("Paste both the article URL and the page HTML.");
+      return;
+    }
+    setManualBusy(true);
+    try {
+      const res = await fetch("/api/articles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: manualUrl.trim(), html: manualHtml }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
+      setManualMsg(res.status === 200 ? "Already in Readapaper." : "Saved to Readapaper.");
+      if (data.id) setManualLink(`/a/${data.id}`);
+      setManualHtml("");
+    } catch (err) {
+      setManualMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setManualBusy(false);
     }
   }
 
@@ -97,6 +129,54 @@ export default function BookmarkletPage() {
             {copied ? "Copied!" : "Copy"}
           </button>
         </div>
+
+        <h2 id="manual">4. Site blocked the save? Manual save</h2>
+        <p className="muted">
+          Some sites (e.g. sfstandard.com) send a strict{" "}
+          <code>Content-Security-Policy: connect-src</code> that blocks the bookmarklet&apos;s{" "}
+          <code>fetch(BASE + &apos;/api/articles&apos;)</code> — you&apos;ll see a console error
+          like “Connecting to &apos;http://localhost:3000/api/articles&apos; violates …
+          connect-src”. The page&apos;s CSP wins over CORS: even with{" "}
+          <code>Access-Control-Allow-Origin: *</code> the browser never sends the request. Two extra
+          traps on https article pages: an <code>http://</code> Readapaper base is mixed-content
+          (plus <code>upgrade-insecure-requests</code> / <code>block-all-mixed-content</code>), and
+          a bare <code>localhost:3000</code> CSP entry only covers the page&apos;s own scheme
+          (https), not http. Fix: serve Readapaper over <strong>https</strong> (tunnel/deploy) and
+          reinstall the bookmarklet from that origin — sfstandard&apos;s <code>connect-src</code>{" "}
+          allows any <code>https:</code> host. When the direct save is blocked, the bookmarklet now
+          copies the page HTML to your clipboard automatically — paste it below.
+        </p>
+        <form onSubmit={manualSave}>
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <input
+              type="url"
+              required
+              placeholder="Article URL…"
+              value={manualUrl}
+              onChange={(e) => setManualUrl(e.target.value)}
+              aria-label="Article URL for manual save"
+            />
+            <textarea
+              rows={6}
+              required
+              placeholder="Paste page HTML here (bookmarklet copies it on CSP block)…"
+              value={manualHtml}
+              onChange={(e) => setManualHtml(e.target.value)}
+              aria-label="Page HTML for manual save"
+              style={{ fontSize: "0.75rem", fontFamily: "monospace" }}
+            />
+            <div>
+              <button className="primary" type="submit" disabled={manualBusy}>
+                {manualBusy ? "Saving…" : "Save pasted HTML"}
+              </button>
+            </div>
+          </div>
+        </form>
+        {manualMsg && (
+          <p className="muted" role="status">
+            {manualMsg} {manualLink && <a href={manualLink}>Open in Readapaper &rarr;</a>}
+          </p>
+        )}
 
         <h2>Why it beats scraping protection</h2>
         <ul className="muted">

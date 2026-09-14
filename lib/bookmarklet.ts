@@ -45,7 +45,28 @@ var verb=(x.status===200)?'Already in':'Saved to';
 var link=id?'<br><a href="'+BASE+'/a/'+id+'" target="_blank" style="color:#93c5fd;font-weight:700">Open in Readapaper &rarr;</a>':'';
 done(verb+' Readapaper.'+link,0);
 })
-.catch(function(e){done('Save failed: '+(e&&e.message||e),8000);});
+.catch(function(e){
+var insecure=BASE.indexOf('http://')===0&&location.protocol==='https:';
+var help='<br><a href="'+BASE+'/bookmarklet#manual" target="_blank" style="color:#93c5fd">Manual save help</a>';
+function show(msg){done(msg+help,15000);}
+try{
+if(navigator.clipboard&&navigator.clipboard.writeText){
+navigator.clipboard.writeText(html).then(function(){
+var m='Site blocked the direct save (CSP/mixed-content). Page HTML copied — paste it at '+BASE+'/bookmarklet (Manual save).';
+if(insecure){m+=' Tip: your Readapaper is http but this page is https — browsers block that. Use an https Readapaper URL (tunnel/deploy) and reinstall.';}
+show(m);
+},function(){
+var m2='Site blocked the direct save (CSP/mixed-content: '+(e&&e.message||e)+'). Paste the page HTML manually at '+BASE+'/bookmarklet (Manual save).';
+if(insecure){m2+=' Tip: http Readapaper + https page is always blocked — use https.';}
+show(m2);
+});
+return;
+}
+}catch(_){}
+var m3='Site blocked the direct save (CSP/mixed-content: '+(e&&e.message||e)+'). Paste manually at '+BASE+'/bookmarklet (Manual save).';
+if(insecure){m3+=' Your Readapaper is http but this page is https — browsers block that. Use an https Readapaper URL and reinstall.';}
+show(m3);
+});
 }catch(e){done('Save failed: '+(e&&e.message||e),8000);}
 })()`;
 

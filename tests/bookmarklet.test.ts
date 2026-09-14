@@ -26,4 +26,13 @@ describe("buildBookmarklet", () => {
     expect(out).toContain("a\\'b");
     expect(out.startsWith("javascript:")).toBe(true);
   });
+
+  it("falls back to clipboard + manual save on CSP/mixed-content block", () => {
+    const out = buildBookmarklet("http://localhost:3000");
+    expect(out).toContain("navigator.clipboard");
+    expect(out).toContain("writeText(html)");
+    expect(out).toContain("CSP/mixed-content");
+    expect(out).toContain("/bookmarklet#manual");
+    expect(out).toContain("location.protocol");
+  });
 });
