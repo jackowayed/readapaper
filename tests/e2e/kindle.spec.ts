@@ -19,8 +19,9 @@ test("library shows a disabled Kindle button with a setup hint when unconfigured
   expect(body).not.toHaveProperty("kindleEmail");
   expect(body).not.toHaveProperty("fromEmail");
 
-  // The Kindle control is injected by an inline script into a
-  // hydration-exempt root — it must never trip React hydration (#418).
+  // The Kindle control is a React client component (status loads in
+  // useEffect) so server HTML and first client render match — it must
+  // never trip React hydration.
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
