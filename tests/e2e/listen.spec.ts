@@ -257,7 +257,9 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
 
   const rateSelect = page.getByLabel("Speech rate");
-  const voiceSelect = page.getByLabel("Voice");
+  // Exact match: the Archive button's aria-label ("Archive <title>") also
+  // contains the word "Voice" (e.g. the "voicesettings" test title).
+  const voiceSelect = page.getByLabel("Voice", { exact: true });
 
   // Persist rate + voice (localStorage = per-browser, works offline).
   await rateSelect.selectOption("1.5");
