@@ -153,37 +153,7 @@ data/articles.json         # created at runtime
 
 ## 10. Task list (live — updated as we go)
 
-- [x] Scaffold Next.js TS app + deps (readability, jsdom, dompurify, nanoid)
-- [x] `lib/text.ts` + `lib/store.ts` + `lib/extract.ts`
-- [x] API routes: extract, articles CRUD, progress
-- [x] UI: save form, list, article view, themes, progress resume
-- [x] `SyncedReader`: voices/rate, sentence queue, word highlight, auto-scroll, click-to-seek
-- [x] Seed fixture + verify `npm run build`, extraction unit check
-- [x] Verified 2026-09-10: `tsc` clean, `next build` ok, smoke test (POST html->201, GET list/one, PUT progress, reader 200, DELETE 204), tokenizer check (3 sents/2 words)
-- [x] 2026-09-10 (`b28930c`): srcset-only/lazy/`<picture>` image restoration in extractor
-- [x] 2026-09-10 (`e3cdc80`): DOM-saving bookmarklet (`/bookmarklet`, `POST {url, html}` with CORS) for paywalled/bot-blocked pages
-- [x] 2026-09-10 (`a271e7e`): URL dedup on save — duplicate URL returns existing article (200) instead of a new row — `lib/store.ts` (normalizeUrl/findArticleByUrl), `app/api/articles/route.ts`, `lib/bookmarklet.ts` (toast says "Already in Readapaper")
-- [x] 2026-09-11 (`e3a193e`): P0 quality gates per `QUALITY_PLAN.md` — vitest (79 tests) + strict `tsc` + `eslint .` + prettier + husky/lint-staged + CI; `typecheck`/`lint`/`format:check`/`test`/`build` all green
-- [x] 2026-09-11 (`8ec651d`): P2 per `QUALITY_PLAN.md` — Playwright e2e 4/4 + CI job, rate limits + logging, Dependabot + audit gate, `TESTING.md`; unit suite now 92/92
-- [x] 2026-09-11 (`48da2f1`): offline progress queue + media session helpers with unit tests (`lib/offline-queue.ts`, `lib/media-session.ts`)
-- [x] 2026-09-11 (`ecfb3d5`): offline PWA shell — manifest, service worker, `/offline` fallback, connectivity banner, offline e2e spec
-- [x] 2026-09-11 (`0276bcf`): offline progress sync + Media Session wiring in reader, offline save guard
-- [x] 2026-09-11 (`74562cb`): proactive offline warming — library + unopened articles cached via `lib/offline-cache.ts` + `OfflineCacheButton`, SW `readapaper-v2`
-- [x] 2026-09-11 (`ca62d69`): Serwist migration — build-time precache + runtime recipes replace hand-rolled SW; e2e on `next start`
-- [x] Unified progress (plan: `docs/unified-progress.md`) — canonical `progressOffset` char-offset, legacy `progress` fraction as derived mirror; silent restore + seamless Read↔Listen handoff
-  - [x] DONE 2026-09-12 (`01cf32a`): Phase 0 — `lib/progress-sync.ts` mapping helpers + unit tests
-  - [x] DONE 2026-09-12 (`876a3fa`): Phases 1–3 — store `progressOffset`/`progressUpdatedAt` + lazy migration + `updateProgressOffset`, `PUT progress` accepts `{offset}`/keeps `{progress}`/returns both, offline queue offset support + tests — `lib/types.ts`, `lib/store.ts`, `app/api/articles/[id]/progress/route.ts`, `lib/offline-queue.ts`
-  - [x] DONE 2026-09-12 (`b31c82c`): Phase 4 — ReaderClient ownership + hook/SyncedReader wiring + handoff e2e — `components/ReaderClient.tsx`, `components/ThemeControl.tsx`, `components/SyncedReader.tsx`, `tests/e2e/progress-sync.spec.ts`
-- [x] 2026-09-12 (`bde8a32`, `817dfd8`): Listen reliability (plan: `docs/listen-reliability.md`) — `lib/speech-queue.ts` pure queue harness + unit tests; audible `idle|playing|paused|error` status + error surfacing (position kept for retry), reader error boundary with retry (`app/a/[id]/error.tsx`), mocked-speechSynthesis e2e (`tests/e2e/listen.spec.ts`); `cancel→speak` race NOT repro'd headless — surfacing only, order unchanged
-- [x] 2026-09-12 (`0d814bf`): Archive (plan: `docs/archive.md`) — see §9 Library features DONE entry
-- [x] 2026-09-12 (`7c58150`, `57913b1`): Send to Kindle (plan: `docs/kindle.md`) — see §9 Reading extras DONE entry
-- [x] 2026-09-13 (`48daf83`): offline proactive sync — warm on every `/` load (dropped 10-min throttle) + warm-on-save, failed warms keep last good count, same-tab ready event
-- [x] 2026-09-13 (`2a08675`): Listen voice memory + transport cleanup — per-browser rate/voice in localStorage (offline-safe, `lib/voice-settings.ts` + unit tests), single Play/Pause (Stop removed, OS stop maps to pause, Media Session kept while paused), rate/voice changes restart mid-play from the playhead — `components/SyncedReader.tsx`, e2e `tests/e2e/listen.spec.ts`
-- [x] 2026-09-13 (`d03cdba`): article-page header Archive/Unarchive toggle — see §9 Library features DONE entry
-- [x] 2026-09-14 (`07bbd73`): isolated `next dev` cache — `NEXT_DIST_DIR=.next-dev` in `npm run dev` (`next.config.mjs` falls back to `.next`; build/start/e2e keep `.next`), after a prod `next build` during dev corrupted `.next` vendor chunks (article page 500s); `.next-dev/` gitignored + eslint-ignored, covered in `tsconfig.json` types include
-- [ ] Update this doc with deviations
-
-Deviations from plan: added `serverExternalPackages` for jsdom + `eslint.ignoreDuringBuilds` (Next15/eslint9 patch issue — since flipped back to `false` once `eslint .` flat config landed 2026-09-11); store file `data/articles.json` gitignored, resets to `[]`; `.open-next/` + `.wrangler/` gitignored build artifacts (`ddc2e87`); quality tooling 2026-09-11 (`e3a193e`): `vitest@5` + `@vitest/coverage-v8`, `typescript-eslint@8` + `eslint-plugin-react-hooks`, `prettier@3`, `husky@9` + `lint-staged`, `.github/workflows/ci.yml`, `vitest.config.ts`, `tests/` + `tests/fixtures/`; P2 2026-09-11 (`8ec651d`): `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `lib/rate-limit.ts` + `tests/rate-limit.test.ts`, `.github/dependabot.yml`, audit + e2e CI jobs, `TESTING.md`; offline 2026-09-11 (`ecfb3d5`): vanilla `public/sw.js` with no `next-pwa`/Workbox dep (zero-dependency, Cache Storage API directly) — excluded from `eslint .` ignores since Next lint rules don't apply to SW scope; superseded 2026-09-11 (`ca62d69`) by Serwist (`serwist@9` + `@serwist/next@9`, `app/sw.ts` source, generated `public/sw.js` gitignored, `webworker` lib + `@serwist/next/typings` in `tsconfig.json`); e2e webServer switched to `next start` (worker is prod-only); process 2026-09-12: `.opencode/skills/autonomous-execution/SKILL.md` (supervisor+subagents execution skill, no build impact); features 2026-09-12 (`01cf32a`→`817dfd8`): unified progress (`lib/progress-sync.ts`, `lib/types.ts`, `lib/store.ts`, `app/api/articles/[id]/progress/route.ts`, `lib/offline-queue.ts`, `components/ReaderClient.tsx`/`ThemeControl.tsx`/`SyncedReader.tsx`, `tests/*progress*`, `tests/e2e/progress-sync.spec.ts`); listen reliability (`lib/speech-queue.ts`, `app/a/[id]/error.tsx`, `tests/e2e/listen.spec.ts`, no new deps — e2e `addInitScript` mock instead of `@testing-library/react`); archive (`app/api/articles/[id]/archive/route.ts`, `GET ?archived` default change, `tests/archive.test.ts`, `tests/e2e/archive.spec.ts`); kindle (`nodemailer@10` + `@types/nodemailer@8`, `app/api/kindle/send|status`, `.env*` gitignored + `.env.example` setup doc, `tests/kindle*.test.ts`, `tests/e2e/kindle.spec.ts`); note: progress route has no rate limiter/host-only logging (spec said "unchanged" — pre-existing gap, not introduced here).
+- [ ]
 
 ## 11. Risks
 
