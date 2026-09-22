@@ -9,6 +9,11 @@ const revision =
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
   swDest: "public/sw.js",
+  // Dev never builds the worker: `next dev` would otherwise overwrite the
+  // production `public/sw.js` with a dev-mode bundle (defaultCache becomes
+  // NetworkOnly, killing runtime caching -> offline e2e + offline reads
+  // break). The worker is prod-only (`next start`, e2e runs).
+  disable: process.env.NODE_ENV !== "production",
   additionalPrecacheEntries: [{ url: "/offline", revision }],
 });
 
