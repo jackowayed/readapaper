@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createArticle, listArticles, toSummary } from "@/lib/store";
+import type { SortKey } from "@/lib/store";
 import { extractFromHtml, extractFromUrl, assertSafeHttpUrl } from "@/lib/extract";
 import {
   checkRateLimit,
@@ -36,18 +37,31 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
+const SORT_KEYS: SortKey[] = ["newest", "oldest", "longest", "shortest", "progress"];
+
 export async function GET(req: Request) {
-  const param = new URL(req.url).searchParams.get("archived");
+  const searchParams = new URL(req.url).searchParams;
+  const rawSort = searchParams.get("sort");
+  const sort: SortKey = rawSort === null ? "newest" : (rawSort as SortKey);
+  if (rawSort !== null && !SORT_KEYS.includes(sort)) {
+    return json({ error: `Invalid sort, expected one of: ${SORT_KEYS.join(", ")}` }, 400);
+  }
+  const rawQ = searchParams.get("q");
+  const q = rawQ === null ? undefined : rawQ.trim();
+  if (q !== undefined && q.length > 200) {
+    return json({ error: "Query too long (max 200 chars)" }, 400);
+  }
+  const param = searchParams.get("archived");
   if (param === "all") {
-    const articles = await listArticles();
+    const articles = await listArticles({ q, sort });
     return json(articles.map(toSummary));
   }
   if (param === "1") {
-    const articles = await listArticles({ archived: true });
+    const articles = await listArticles({ archived: true, q, sort });
     return json(articles.map(toSummary));
   }
   if (param === null || param === "0") {
-    const articles = await listArticles({ archived: false });
+    const articles = await listArticles({ archived: false, q, sort });
     return json(articles.map(toSummary));
   }
   return json({ error: "Invalid archived param (expected 0, 1, or all)" }, 400);

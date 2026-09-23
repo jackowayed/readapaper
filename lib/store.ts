@@ -98,13 +98,49 @@ export function toSummary(a: Article): ArticleSummary {
   };
 }
 
-export async function listArticles(filter?: { archived?: boolean }): Promise<Article[]> {
+export type SortKey = "newest" | "oldest" | "longest" | "shortest" | "progress";
+
+export async function listArticles(filter?: {
+  archived?: boolean;
+  q?: string;
+  sort?: SortKey;
+}): Promise<Article[]> {
   const all = await readAll();
   const filtered =
     filter && typeof filter.archived === "boolean"
       ? all.filter((a) => a.archived === filter.archived)
       : all;
-  return filtered.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const needle = typeof filter?.q === "string" ? filter.q.trim().toLowerCase() : "";
+  const searched =
+    needle === ""
+      ? filtered
+      : filtered.filter((a) =>
+          [a.title, a.byline, a.excerpt, a.text, a.url].some(
+            (field) => typeof field === "string" && field.toLowerCase().includes(needle)
+          )
+        );
+  const sort: SortKey = filter?.sort ?? "newest";
+  const newestFirst = (a: Article, b: Article) => (a.createdAt < b.createdAt ? 1 : -1);
+  const sorted = [...searched];
+  switch (sort) {
+    case "oldest":
+      sorted.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      break;
+    case "longest":
+      sorted.sort((a, b) => b.wordCount - a.wordCount || newestFirst(a, b));
+      break;
+    case "shortest":
+      sorted.sort((a, b) => a.wordCount - b.wordCount || newestFirst(a, b));
+      break;
+    case "progress":
+      sorted.sort((a, b) => b.progress - a.progress || newestFirst(a, b));
+      break;
+    case "newest":
+    default:
+      sorted.sort(newestFirst);
+      break;
+  }
+  return sorted;
 }
 
 export async function getArticle(id: string): Promise<Article | null> {

@@ -4,7 +4,13 @@ import { useRouter } from "next/navigation";
 import type { ArticleSummary } from "@/lib/types";
 import { readingMinutes } from "@/lib/text";
 
-export default function ArticleList({ articles }: { articles: ArticleSummary[] }) {
+export default function ArticleList({
+  articles,
+  emptyLabel = "Nothing saved yet. Paste a URL above.",
+}: {
+  articles: ArticleSummary[];
+  emptyLabel?: string;
+}) {
   const router = useRouter();
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -66,7 +72,7 @@ export default function ArticleList({ articles }: { articles: ArticleSummary[] }
   }
 
   if (!articles.length) {
-    return <p className="muted">Nothing saved yet. Paste a URL above.</p>;
+    return <p className="muted">{emptyLabel}</p>;
   }
 
   return (
