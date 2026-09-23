@@ -98,10 +98,12 @@ describe("listArticles", () => {
     await expect(store.listArticles()).resolves.toEqual([]);
   });
 
-  it("throws on corrupt JSON", async () => {
+  it("recovers from corrupt JSON to [] with a backup file", async () => {
     const file = await dataFile();
     await fs.writeFile(file, "not-json{{{", "utf8");
-    await expect(store.listArticles()).rejects.toThrow();
+    await expect(store.listArticles()).resolves.toEqual([]);
+    const entries = await fs.readdir(path.dirname(file));
+    expect(entries.some((e) => e.startsWith("articles.json.corrupt-"))).toBe(true);
   });
 });
 
@@ -136,5 +138,48 @@ describe("deleteArticle", () => {
     const { article } = await store.createArticle(sample("https://example.com/a"));
     expect(await store.deleteArticle(article.id)).toBe(true);
     expect(await store.getArticle(article.id)).toBeNull();
+  });
+});
+
+describe("concurrent writes (mutex)", () => {
+  it("persists all parallel createArticle calls", async () => {
+    const N = 10;
+    const results = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        store.createArticle(sample(`https://example.com/concurrent-${i}`))
+      )
+    );
+    expect(results.every((r) => r.created)).toBe(true);
+    const list = await store.listArticles();
+    expect(list).toHaveLength(N);
+    expect(new Set(list.map((a) => a.url)).size).toBe(N);
+  });
+
+  it("applies interleaved progress + archive updates without lost writes", async () => {
+    const { article } = await store.createArticle(sample("https://example.com/a"));
+    const len = article.text.length;
+    await Promise.all([
+      store.updateProgressOffset(article.id, 5),
+      store.setArchived(article.id, true),
+    ]);
+    const got = (await store.getArticle(article.id))!;
+    expect(got.progressOffset).toBe(5);
+    expect(got.progress).toBe(5 / len);
+    expect(got.archived).toBe(true);
+    expect(typeof got.archivedAt).toBe("string");
+  });
+});
+
+describe("corrupt JSON recovery", () => {
+  it("returns [], backs up the corrupt file, and stays writable", async () => {
+    const file = await dataFile();
+    await fs.writeFile(file, "not-json{{{", "utf8");
+    await expect(store.listArticles()).resolves.toEqual([]);
+    const entries = await fs.readdir(path.dirname(file));
+    expect(entries.some((e) => e.startsWith("articles.json.corrupt-"))).toBe(true);
+    const { article, created } = await store.createArticle(sample("https://example.com/a"));
+    expect(created).toBe(true);
+    expect(await store.getArticle(article.id)).not.toBeNull();
+    expect(await store.listArticles()).toHaveLength(1);
   });
 });

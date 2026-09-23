@@ -8,6 +8,20 @@ import { clampOffset, fractionToOffset, offsetToFraction } from "./progress-sync
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "articles.json");
 
+// In-process promise-queue mutex serializing read-modify-write ops.
+// Read-only ops (readAll, listArticles, getArticle, findArticleByUrl,
+// toSummary, normalizeUrl) stay unlocked.
+let queue: Promise<void> = Promise.resolve();
+
+function withLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = queue.then(() => fn());
+  queue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 async function readAll(): Promise<Article[]> {
   try {
     const raw = await fs.readFile(DATA_FILE, "utf8");
@@ -33,6 +47,17 @@ async function readAll(): Promise<Article[]> {
     });
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    if (e instanceof SyntaxError) {
+      // Corrupt JSON: back up the bad file (best-effort) and start empty
+      // so a single bad write doesn't 500 every route.
+      try {
+        await fs.rename(DATA_FILE, `${DATA_FILE}.corrupt-${Date.now()}`);
+      } catch {
+        // ignore rename errors (e.g. already moved by a concurrent reader)
+      }
+      console.error("[store] articles.json is corrupt; moved to backup and starting empty");
+      return [];
+    }
     throw e;
   }
 }
@@ -110,7 +135,7 @@ export async function findArticleByUrl(url: string): Promise<Article | null> {
  * Create an article unless one with the same URL already exists. Returns
  * `{ article, created }` so callers can report duplicates.
  */
-export async function createArticle(input: {
+async function createArticleUnsafe(input: {
   url: string;
   title: string;
   byline: string | null;
@@ -143,7 +168,18 @@ export async function createArticle(input: {
   return { article, created: true };
 }
 
-export async function deleteArticle(id: string): Promise<boolean> {
+export async function createArticle(input: {
+  url: string;
+  title: string;
+  byline: string | null;
+  excerpt: string | null;
+  html: string;
+  text: string;
+}): Promise<{ article: Article; created: boolean }> {
+  return withLock(() => createArticleUnsafe(input));
+}
+
+async function deleteArticleUnsafe(id: string): Promise<boolean> {
   const all = await readAll();
   const next = all.filter((a) => a.id !== id);
   if (next.length === all.length) return false;
@@ -151,12 +187,16 @@ export async function deleteArticle(id: string): Promise<boolean> {
   return true;
 }
 
+export async function deleteArticle(id: string): Promise<boolean> {
+  return withLock(() => deleteArticleUnsafe(id));
+}
+
 /**
  * Set the canonical char-offset position. Recomputes the derived `progress`
  * fraction mirror and stamps `progressUpdatedAt`. Returns the updated
  * `{ offset, progress }`, or `null` when the id is unknown.
  */
-export async function updateProgressOffset(
+async function updateProgressOffsetUnsafe(
   id: string,
   offset: number
 ): Promise<{ offset: number; progress: number } | null> {
@@ -172,20 +212,36 @@ export async function updateProgressOffset(
   return { offset: found.progressOffset, progress: found.progress };
 }
 
-export async function updateProgress(id: string, progress: number): Promise<boolean> {
-  const existing = await getArticle(id);
-  if (!existing) return false;
-  const textLength = typeof existing.text === "string" ? existing.text.length : 0;
+export async function updateProgressOffset(
+  id: string,
+  offset: number
+): Promise<{ offset: number; progress: number } | null> {
+  return withLock(() => updateProgressOffsetUnsafe(id, offset));
+}
+
+async function updateProgressUnsafe(id: string, progress: number): Promise<boolean> {
+  const all = await readAll();
+  const found = all.find((a) => a.id === id);
+  if (!found) return false;
+  const textLength = typeof found.text === "string" ? found.text.length : 0;
   const offset = fractionToOffset(progress, textLength);
-  const res = await updateProgressOffset(id, offset);
-  return res !== null;
+  const clamped = clampOffset(offset, textLength);
+  found.progressOffset = clamped;
+  found.progress = offsetToFraction(clamped, textLength);
+  found.progressUpdatedAt = new Date().toISOString();
+  await writeAll(all);
+  return true;
+}
+
+export async function updateProgress(id: string, progress: number): Promise<boolean> {
+  return withLock(() => updateProgressUnsafe(id, progress));
 }
 
 /**
  * Flip the archived flag, stamping `archivedAt` on archive and clearing it
  * on unarchive. Returns the updated article, or `null` when unknown.
  */
-export async function setArchived(id: string, archived: boolean): Promise<Article | null> {
+async function setArchivedUnsafe(id: string, archived: boolean): Promise<Article | null> {
   const all = await readAll();
   const found = all.find((a) => a.id === id);
   if (!found) return null;
@@ -193,4 +249,8 @@ export async function setArchived(id: string, archived: boolean): Promise<Articl
   found.archivedAt = archived ? new Date().toISOString() : null;
   await writeAll(all);
   return found;
+}
+
+export async function setArchived(id: string, archived: boolean): Promise<Article | null> {
+  return withLock(() => setArchivedUnsafe(id, archived));
 }
