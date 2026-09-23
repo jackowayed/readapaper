@@ -43,7 +43,23 @@ async function readAll(): Promise<Article[]> {
       const archived = typeof a.archived === "boolean" ? a.archived : false;
       const archivedAt =
         typeof a.archivedAt === "string" || a.archivedAt === null ? a.archivedAt : null;
-      return { ...a, progress, progressOffset, progressUpdatedAt, archived, archivedAt };
+      const liked = typeof a.liked === "boolean" ? a.liked : false;
+      const likedAt = typeof a.likedAt === "string" || a.likedAt === null ? a.likedAt : null;
+      const deleted = typeof a.deleted === "boolean" ? a.deleted : false;
+      const deletedAt =
+        typeof a.deletedAt === "string" || a.deletedAt === null ? a.deletedAt : null;
+      return {
+        ...a,
+        progress,
+        progressOffset,
+        progressUpdatedAt,
+        archived,
+        archivedAt,
+        liked,
+        likedAt,
+        deleted,
+        deletedAt,
+      };
     });
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
@@ -81,6 +97,10 @@ export function toSummary(a: Article): ArticleSummary {
     progressOffset,
     archived,
     archivedAt,
+    liked,
+    likedAt,
+    deleted,
+    deletedAt,
     createdAt,
   } = a;
   return {
@@ -94,6 +114,10 @@ export function toSummary(a: Article): ArticleSummary {
     progressOffset,
     archived,
     archivedAt,
+    liked,
+    likedAt,
+    deleted,
+    deletedAt,
     createdAt,
   };
 }
@@ -102,19 +126,31 @@ export type SortKey = "newest" | "oldest" | "longest" | "shortest" | "progress";
 
 export async function listArticles(filter?: {
   archived?: boolean;
+  liked?: boolean;
+  deleted?: boolean;
   q?: string;
   sort?: SortKey;
 }): Promise<Article[]> {
   const all = await readAll();
+  // Soft-deleted rows are hidden by default in every scope; pass
+  // { deleted: true } for the trash scope or { deleted: false } explicitly.
+  const visible =
+    filter && typeof filter.deleted === "boolean"
+      ? all.filter((a) => a.deleted === filter.deleted)
+      : all.filter((a) => !a.deleted);
   const filtered =
     filter && typeof filter.archived === "boolean"
-      ? all.filter((a) => a.archived === filter.archived)
-      : all;
+      ? visible.filter((a) => a.archived === filter.archived)
+      : visible;
+  const liked =
+    filter && typeof filter.liked === "boolean"
+      ? filtered.filter((a) => a.liked === filter.liked)
+      : filtered;
   const needle = typeof filter?.q === "string" ? filter.q.trim().toLowerCase() : "";
   const searched =
     needle === ""
-      ? filtered
-      : filtered.filter((a) =>
+      ? liked
+      : liked.filter((a) =>
           [a.title, a.byline, a.excerpt, a.text, a.url].some(
             (field) => typeof field === "string" && field.toLowerCase().includes(needle)
           )
@@ -164,7 +200,9 @@ export function normalizeUrl(url: string): string {
 export async function findArticleByUrl(url: string): Promise<Article | null> {
   const key = normalizeUrl(url);
   const all = await readAll();
-  return all.find((a) => normalizeUrl(a.url) === key) ?? null;
+  // Dedup matches non-deleted rows only: re-saving a trashed URL
+  // creates a fresh article instead of resurrecting the trashed one.
+  return all.find((a) => !a.deleted && normalizeUrl(a.url) === key) ?? null;
 }
 
 /**
@@ -197,6 +235,10 @@ async function createArticleUnsafe(input: {
     progressUpdatedAt: null,
     archived: false,
     archivedAt: null,
+    liked: false,
+    likedAt: null,
+    deleted: false,
+    deletedAt: null,
     createdAt: now,
   };
   all.push(article);
@@ -286,7 +328,43 @@ async function setArchivedUnsafe(id: string, archived: boolean): Promise<Article
   await writeAll(all);
   return found;
 }
-
 export async function setArchived(id: string, archived: boolean): Promise<Article | null> {
   return withLock(() => setArchivedUnsafe(id, archived));
+}
+
+/**
+ * Flip the liked flag, stamping `likedAt` on like and clearing it on
+ * unlike. Returns the updated article, or `null` when unknown.
+ */
+async function setLikedUnsafe(id: string, liked: boolean): Promise<Article | null> {
+  const all = await readAll();
+  const found = all.find((a) => a.id === id);
+  if (!found) return null;
+  found.liked = liked;
+  found.likedAt = liked ? new Date().toISOString() : null;
+  await writeAll(all);
+  return found;
+}
+
+export async function setLiked(id: string, liked: boolean): Promise<Article | null> {
+  return withLock(() => setLikedUnsafe(id, liked));
+}
+
+/**
+ * Soft-delete (trash) or restore an article, stamping `deletedAt` on trash
+ * and clearing it on restore. Returns the updated article, or `null` when
+ * unknown.
+ */
+async function setDeletedUnsafe(id: string, deleted: boolean): Promise<Article | null> {
+  const all = await readAll();
+  const found = all.find((a) => a.id === id);
+  if (!found) return null;
+  found.deleted = deleted;
+  found.deletedAt = deleted ? new Date().toISOString() : null;
+  await writeAll(all);
+  return found;
+}
+
+export async function setDeleted(id: string, deleted: boolean): Promise<Article | null> {
+  return withLock(() => setDeletedUnsafe(id, deleted));
 }

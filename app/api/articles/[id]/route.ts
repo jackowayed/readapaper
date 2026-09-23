@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteArticle, getArticle } from "@/lib/store";
+import { deleteArticle, getArticle, setDeleted } from "@/lib/store";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -30,7 +30,14 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     );
   }
   const { id } = await ctx.params;
-  const ok = await deleteArticle(id);
-  if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Default is a soft-delete (move to trash, restorable). Only an explicit
+  // ?permanent=1 hard-deletes the row. Both answer 204, as before.
+  if (new URL(req.url).searchParams.get("permanent") === "1") {
+    const ok = await deleteArticle(id);
+    if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return new NextResponse(null, { status: 204 });
+  }
+  const updated = await setDeleted(id, true);
+  if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

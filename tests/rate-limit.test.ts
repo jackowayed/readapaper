@@ -14,6 +14,8 @@ let extractRoute: typeof import("../app/api/extract/route");
 let idRoute: typeof import("../app/api/articles/[id]/route");
 let progressRoute: typeof import("../app/api/articles/[id]/progress/route");
 let archiveRoute: typeof import("../app/api/articles/[id]/archive/route");
+let likeRoute: typeof import("../app/api/articles/[id]/like/route");
+let trashRoute: typeof import("../app/api/articles/[id]/trash/route");
 let rl: typeof import("../lib/rate-limit");
 
 function fixture(name: string): string {
@@ -251,6 +253,8 @@ describe("mutation rate limits (progress/archive/delete)", () => {
     idRoute = await import("../app/api/articles/[id]/route");
     progressRoute = await import("../app/api/articles/[id]/progress/route");
     archiveRoute = await import("../app/api/articles/[id]/archive/route");
+    likeRoute = await import("../app/api/articles/[id]/like/route");
+    trashRoute = await import("../app/api/articles/[id]/trash/route");
     rl = await import("../lib/rate-limit");
   });
 
@@ -299,6 +303,22 @@ describe("mutation rate limits (progress/archive/delete)", () => {
     expect(limited.status).toBe(429);
     expect(await limited.json()).toEqual({ error: "Rate limited, retry soon" });
     expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("429s PUT like and PUT trash after the limit, with Retry-After", async () => {
+    rl.setRateLimitOverride("articles-like:7.7.7.11", 1, 60_000);
+    rl.setRateLimitOverride("articles-trash:7.7.7.12", 1, 60_000);
+    const id = await savedId("https://example.com/rl/like-trash");
+    const likeOk = await likeRoute.PUT(putReq({ liked: true }, "7.7.7.11"), ctx(id));
+    expect(likeOk.status).toBe(200);
+    const likeLimited = await likeRoute.PUT(putReq({ liked: false }, "7.7.7.11"), ctx(id));
+    expect(likeLimited.status).toBe(429);
+    expect(Number(likeLimited.headers.get("Retry-After"))).toBeGreaterThan(0);
+    const trashOk = await trashRoute.PUT(putReq({ deleted: true }, "7.7.7.12"), ctx(id));
+    expect(trashOk.status).toBe(200);
+    const trashLimited = await trashRoute.PUT(putReq({ deleted: false }, "7.7.7.12"), ctx(id));
+    expect(trashLimited.status).toBe(429);
+    expect(Number(trashLimited.headers.get("Retry-After"))).toBeGreaterThan(0);
   });
 
   it("mutation buckets are per-route and per-IP", async () => {

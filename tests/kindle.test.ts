@@ -22,6 +22,10 @@ function makeArticle(overrides: Partial<Article> & { id: string }): Article {
     progressUpdatedAt: null,
     archived: false,
     archivedAt: null,
+    liked: false,
+    likedAt: null,
+    deleted: false,
+    deletedAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -50,6 +54,19 @@ describe("getKindleBatch", () => {
     const { articles: batch, totalActive } = getKindleBatch(articles);
     expect(batch.map((a) => a.id)).toEqual(["keep", "legacy"]);
     expect(totalActive).toBe(2);
+  });
+
+  it("excludes trashed articles (deleted === true)", () => {
+    const articles = [
+      makeArticle({ id: "keep", createdAt: "2026-02-01T00:00:00.000Z" }),
+      {
+        ...makeArticle({ id: "trashed", createdAt: "2026-03-01T00:00:00.000Z" }),
+        deleted: true,
+      } as unknown as Article,
+    ];
+    const { articles: batch, totalActive } = getKindleBatch(articles);
+    expect(batch.map((a) => a.id)).toEqual(["keep"]);
+    expect(totalActive).toBe(1);
   });
 
   it("caps at 50 and reports totalActive", () => {

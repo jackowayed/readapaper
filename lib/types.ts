@@ -12,6 +12,10 @@ export type Article = {
   progressUpdatedAt: string | null;
   archived: boolean;
   archivedAt: string | null;
+  liked: boolean;
+  likedAt: string | null;
+  deleted: boolean;
+  deletedAt: string | null;
   createdAt: string;
 };
 
@@ -27,5 +31,9 @@ export type ArticleSummary = Pick<
   | "progressOffset"
   | "archived"
   | "archivedAt"
+  | "liked"
+  | "likedAt"
+  | "deleted"
+  | "deletedAt"
   | "createdAt"
 >;

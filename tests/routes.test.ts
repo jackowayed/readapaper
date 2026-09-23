@@ -261,11 +261,24 @@ describe("GET / DELETE /api/articles/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("DELETE removes the article (204) and GET then 404s", async () => {
+  it("DELETE soft-deletes to trash (204, GET still 200, hidden from list)", async () => {
     const saved = (await (
       await articlesRoute.POST(postReq({ url: "https://example.com/a", html: fixture("simple") }))
     ).json()) as { id: string };
     const del = await idRoute.DELETE(new Request("http://localhost/"), ctx(saved.id));
+    expect(del.status).toBe(204);
+    expect((await idRoute.GET(new Request("http://localhost/"), ctx(saved.id))).status).toBe(200);
+    const list = (await (
+      await articlesRoute.GET(new Request("http://localhost/api/articles"))
+    ).json()) as { id: string }[];
+    expect(list).toHaveLength(0);
+  });
+
+  it("DELETE ?permanent=1 hard-deletes (204) and GET then 404s", async () => {
+    const saved = (await (
+      await articlesRoute.POST(postReq({ url: "https://example.com/a", html: fixture("simple") }))
+    ).json()) as { id: string };
+    const del = await idRoute.DELETE(new Request("http://localhost/?permanent=1"), ctx(saved.id));
     expect(del.status).toBe(204);
     expect((await idRoute.GET(new Request("http://localhost/"), ctx(saved.id))).status).toBe(404);
   });

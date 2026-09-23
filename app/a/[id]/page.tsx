@@ -3,6 +3,7 @@ import { getArticle } from "@/lib/store";
 import { readingMinutes } from "@/lib/text";
 import SiteHeader from "@/components/SiteHeader";
 import ArchiveButton from "@/components/ArchiveButton";
+import TrashButton from "@/components/TrashButton";
 import ReaderClient from "@/components/ReaderClient";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,19 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
       <SiteHeader
         brandLabel="← Library"
         actions={
-          <ArchiveButton id={article.id} archived={article.archived} title={article.title} />
+          <>
+            <ArchiveButton id={article.id} archived={article.archived} title={article.title} />
+            <TrashButton id={article.id} deleted={article.deleted} title={article.title} />
+          </>
         }
       />
       <main className="narrow">
+        {article.deleted && (
+          <p role="note">
+            In trash — this article is hidden from the library.{" "}
+            <TrashButton id={article.id} deleted={article.deleted} title={article.title} />
+          </p>
+        )}
         <h1>{article.title}</h1>
         <p className="muted">
           {article.byline ? `${article.byline} · ` : ""}

@@ -77,10 +77,21 @@ test("bookmarklet re-save dedups to 200 with CORS and the same id", async ({ pag
   expect(articleRes?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
 
-  // 6. DELETE -> 204; GET -> 404.
+  // 6. DELETE soft-deletes to trash -> 204 (still GETtable); re-saving the
+  // trashed URL creates a fresh article instead of deduping.
   expect((await request.delete(`/api/articles/${saved.id}`)).status()).toBe(204);
+  expect((await request.get(`/api/articles/${saved.id}`)).status()).toBe(200);
+  const resave = await request.post("/api/articles", { data: { url, html } });
+  expect(resave.status()).toBe(201);
+  const fresh = (await resave.json()) as { id: string };
+  expect(fresh.id).not.toBe(saved.id);
   createdIds.splice(createdIds.indexOf(saved.id), 1);
-  expect((await request.get(`/api/articles/${saved.id}`)).status()).toBe(404);
+  createdIds.push(fresh.id);
+
+  // 7. Permanent delete -> 204; GET -> 404.
+  expect((await request.delete(`/api/articles/${fresh.id}?permanent=1`)).status()).toBe(204);
+  createdIds.splice(createdIds.indexOf(fresh.id), 1);
+  expect((await request.get(`/api/articles/${fresh.id}`)).status()).toBe(404);
 });
 
 test("CORS preflight allows the bookmarklet cross-origin POST", async ({ request }) => {

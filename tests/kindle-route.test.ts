@@ -49,6 +49,10 @@ function makeArticle(id: string, createdAt: string, archived = false): Article {
     progressUpdatedAt: null,
     archived,
     archivedAt: archived ? createdAt : null,
+    liked: false,
+    likedAt: null,
+    deleted: false,
+    deletedAt: null,
     createdAt,
   };
 }

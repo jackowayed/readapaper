@@ -82,9 +82,23 @@ test("save -> list -> read -> progress -> browser -> delete", async ({ page, req
   expect(articleRes?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
 
-  // 6. DELETE -> 204; GET -> 404.
+  // 6. DELETE soft-deletes to trash -> 204; still GETtable, hidden from the
+  // default list, visible via ?deleted=1.
   const del = await request.delete(`/api/articles/${saved.id}`);
   expect(del.status()).toBe(204);
+  expect((await request.get(`/api/articles/${saved.id}`)).status()).toBe(200);
+  const afterDel = (await (await request.get("/api/articles")).json()) as {
+    id: string;
+  }[];
+  expect(afterDel.map((a) => a.id)).not.toContain(saved.id);
+  const trash = (await (await request.get("/api/articles?deleted=1")).json()) as {
+    id: string;
+  }[];
+  expect(trash.map((a) => a.id)).toContain(saved.id);
+
+  // 7. Permanent delete -> 204; GET -> 404.
+  const purge = await request.delete(`/api/articles/${saved.id}?permanent=1`);
+  expect(purge.status()).toBe(204);
   createdIds.splice(createdIds.indexOf(saved.id), 1);
   expect((await request.get(`/api/articles/${saved.id}`)).status()).toBe(404);
 });

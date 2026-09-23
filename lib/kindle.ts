@@ -43,7 +43,8 @@ export type KindleSender = (message: KindleMailMessage) => Promise<unknown>;
 // Once archiving exists, align this predicate with the archive spec
 // instead of reimplementing it here.
 function isActive(article: Article): boolean {
-  return (article as Article & { archived?: unknown }).archived !== true;
+  const a = article as Article & { archived?: unknown; deleted?: unknown };
+  return a.archived !== true && a.deleted !== true;
 }
 
 function compareNewestFirst(a: Article, b: Article): number {

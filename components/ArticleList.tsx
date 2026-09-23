@@ -33,23 +33,64 @@ export default function ArticleList({
     }));
   }
 
-  async function onDelete(id: string) {
-    if (!confirm("Delete this article?")) return;
+  async function onLike(id: string, liked: boolean) {
     clearError(id);
+    const action = liked ? "Like" : "Unlike";
     let res: Response;
     try {
-      res = await fetch(`/api/articles/${id}`, { method: "DELETE" });
+      res = await fetch(`/api/articles/${id}/like`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ liked }),
+      });
     } catch {
-      fail(id, "Delete", null);
+      fail(id, action, null);
       return;
     }
     if (!res.ok) {
-      fail(id, "Delete", res.status);
+      fail(id, action, res.status);
       return;
     }
     router.refresh();
   }
 
+  async function onTrash(id: string, deleted: boolean) {
+    clearError(id);
+    const action = deleted ? "Trash" : "Restore";
+    let res: Response;
+    try {
+      res = await fetch(`/api/articles/${id}/trash`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleted }),
+      });
+    } catch {
+      fail(id, action, null);
+      return;
+    }
+    if (!res.ok) {
+      fail(id, action, res.status);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function onDeleteForever(id: string) {
+    if (!confirm("Permanently delete this article? This cannot be undone.")) return;
+    clearError(id);
+    let res: Response;
+    try {
+      res = await fetch(`/api/articles/${id}?permanent=1`, { method: "DELETE" });
+    } catch {
+      fail(id, "Delete forever", null);
+      return;
+    }
+    if (!res.ok) {
+      fail(id, "Delete forever", res.status);
+      return;
+    }
+    router.refresh();
+  }
   async function onArchive(id: string, archived: boolean) {
     clearError(id);
     const action = archived ? "Archive" : "Unarchive";
@@ -88,9 +129,6 @@ export default function ArticleList({
               {a.wordCount.toLocaleString()} words · {readingMinutes(a.wordCount)} min
               {a.progress > 0 ? ` · ${Math.round(a.progress * 100)}% read` : ""}
             </span>
-            <button onClick={() => onDelete(a.id)} aria-label={`Delete ${a.title}`}>
-              Delete
-            </button>
             {a.archived ? (
               <button onClick={() => onArchive(a.id, false)} aria-label={`Unarchive ${a.title}`}>
                 Unarchive
@@ -98,6 +136,32 @@ export default function ArticleList({
             ) : (
               <button onClick={() => onArchive(a.id, true)} aria-label={`Archive ${a.title}`}>
                 Archive
+              </button>
+            )}
+            {a.liked ? (
+              <button onClick={() => onLike(a.id, false)} aria-label={`Unlike ${a.title}`}>
+                Unlike
+              </button>
+            ) : (
+              <button onClick={() => onLike(a.id, true)} aria-label={`Like ${a.title}`}>
+                Like
+              </button>
+            )}
+            {a.deleted ? (
+              <button onClick={() => onTrash(a.id, false)} aria-label={`Restore ${a.title}`}>
+                Restore
+              </button>
+            ) : (
+              <button onClick={() => onTrash(a.id, true)} aria-label={`Trash ${a.title}`}>
+                Trash
+              </button>
+            )}
+            {a.deleted && (
+              <button
+                onClick={() => onDeleteForever(a.id)}
+                aria-label={`Delete forever ${a.title}`}
+              >
+                Delete forever
               </button>
             )}
           </div>

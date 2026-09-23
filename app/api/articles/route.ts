@@ -51,17 +51,55 @@ export async function GET(req: Request) {
   if (q !== undefined && q.length > 200) {
     return json({ error: "Query too long (max 200 chars)" }, 400);
   }
-  const param = searchParams.get("archived");
-  if (param === "all") {
-    const articles = await listArticles({ q, sort });
+  const archivedParam = searchParams.get("archived");
+  const likedOnly = searchParams.get("liked") === "1";
+  const liked = likedOnly ? true : undefined;
+  // Trash scope: ?deleted=1 shows soft-deleted rows. Inside trash the
+  // archived scope defaults to "all" (trashed items keep their archived
+  // flag); an explicit ?archived=1/0 narrows, ?archived=all is the default.
+  if (searchParams.get("deleted") === "1") {
+    if (
+      archivedParam !== null &&
+      archivedParam !== "1" &&
+      archivedParam !== "0" &&
+      archivedParam !== "all"
+    ) {
+      return json({ error: "Invalid archived param (expected 0, 1, or all)" }, 400);
+    }
+    const filter: {
+      archived?: boolean;
+      liked?: boolean;
+      deleted: boolean;
+      q?: string;
+      sort?: SortKey;
+    } = { deleted: true, q, sort };
+    if (archivedParam === "1") filter.archived = true;
+    else if (archivedParam === "0") filter.archived = false;
+    if (likedOnly) filter.liked = true;
+    const articles = await listArticles(filter);
     return json(articles.map(toSummary));
   }
-  if (param === "1") {
-    const articles = await listArticles({ archived: true, q, sort });
+  // Liked narrows within the archived scope (default active-only).
+  if (archivedParam === "all") {
+    const articles = await listArticles({ q, sort, ...(liked !== undefined ? { liked } : {}) });
     return json(articles.map(toSummary));
   }
-  if (param === null || param === "0") {
-    const articles = await listArticles({ archived: false, q, sort });
+  if (archivedParam === "1") {
+    const articles = await listArticles({
+      archived: true,
+      q,
+      sort,
+      ...(liked !== undefined ? { liked } : {}),
+    });
+    return json(articles.map(toSummary));
+  }
+  if (archivedParam === null || archivedParam === "0") {
+    const articles = await listArticles({
+      archived: false,
+      q,
+      sort,
+      ...(liked !== undefined ? { liked } : {}),
+    });
     return json(articles.map(toSummary));
   }
   return json({ error: "Invalid archived param (expected 0, 1, or all)" }, 400);
