@@ -47,9 +47,37 @@ describe("normalizeUrl", () => {
     expect(store.normalizeUrl("https://example.com/a/b/")).toBe("https://example.com/a/b");
   });
 
-  it("keeps the root slash and preserves query strings", () => {
+  it("keeps the root slash and preserves page-identifying params", () => {
     expect(store.normalizeUrl("https://example.com/")).toBe("https://example.com/");
     expect(store.normalizeUrl("https://example.com/a?x=1")).toBe("https://example.com/a?x=1");
+    expect(store.normalizeUrl("https://example.com/a?page=2&id=abc")).toBe(
+      "https://example.com/a?id=abc&page=2"
+    );
+  });
+
+  it("unifies scheme (http/https), case, and www", () => {
+    expect(store.normalizeUrl("http://example.com/a")).toBe("https://example.com/a");
+    expect(store.normalizeUrl("https://WWW.Example.COM/a")).toBe("https://example.com/a");
+    expect(store.normalizeUrl("http://www.example.com/a")).toBe("https://example.com/a");
+  });
+
+  it("strips tracking params but keeps page params", () => {
+    expect(store.normalizeUrl("https://example.com/a?utm_source=news&id=1")).toBe(
+      "https://example.com/a?id=1"
+    );
+    expect(store.normalizeUrl("https://example.com/a?fbclid=xyz&gclid=123&ref=tw&page=2")).toBe(
+      "https://example.com/a?page=2"
+    );
+    expect(store.normalizeUrl("https://example.com/a?UTM_MEDIUM=email")).toBe(
+      "https://example.com/a"
+    );
+    expect(store.normalizeUrl("https://example.com/a?hsa_kw=shoes")).toBe("https://example.com/a");
+  });
+
+  it("sorts remaining params so order doesn't matter", () => {
+    expect(store.normalizeUrl("https://example.com/a?b=2&a=1")).toBe(
+      "https://example.com/a?a=1&b=2"
+    );
   });
 
   it("returns invalid URLs unchanged", () => {
@@ -67,19 +95,31 @@ describe("createArticle / dedup", () => {
     expect(article.createdAt).toBeTruthy();
   });
 
-  it("returns created:false for duplicates (hash/trailing-slash variants)", async () => {
+  it("returns created:false for duplicates (hash/trailing-slash/scheme/www/tracking variants)", async () => {
     const first = await store.createArticle(sample("https://example.com/a"));
     expect(first.created).toBe(true);
     for (const variant of [
       "https://example.com/a",
       "https://example.com/a#section",
       "https://example.com/a/",
+      "http://example.com/a",
+      "https://www.example.com/a",
+      "https://example.com/a?utm_source=newsletter",
+      "http://www.example.com/a/?fbclid=xyz#top",
     ]) {
       const dup = await store.createArticle(sample(variant));
       expect(dup.created).toBe(false);
       expect(dup.article.id).toBe(first.article.id);
     }
     expect(await store.listArticles()).toHaveLength(1);
+  });
+
+  it("treats distinct page params as distinct articles", async () => {
+    const a = await store.createArticle(sample("https://example.com/a?page=1"));
+    const b = await store.createArticle(sample("https://example.com/a?page=2"));
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true);
+    expect(await store.listArticles()).toHaveLength(2);
   });
 });
 

@@ -146,7 +146,7 @@ data/articles.json         # created at runtime
   - [x] DONE 2026-09-13 (`d03cdba`): article-page header Archive/Unarchive toggle — `components/ArchiveButton.tsx` (client toggle via existing archive PUT + `router.refresh()`), generic `actions` slot in `components/SiteHeader.tsx` (`.topbar-right`), wired in `app/a/[id]/page.tsx`, header toggle e2e in `tests/e2e/archive.spec.ts`.
   - [x] DONE 2026-09-23 (`0c11b83`): full-text search + sort — substring `?q=` over title/byline/excerpt/text/url + `?sort=newest|oldest|longest|shortest|progress` in `listArticles`/`GET /api/articles`, server search/sort form in `app/page.tsx` (scope-preserving links, `emptyLabel` in `ArticleList.tsx`); pg_trgm/Meili deferred to the Postgres migration.
   - [x] DONE 2026-09-23 (`ae5444f`): starred/liked + trash — `liked`/`deleted` (+ `*At`) with lazy migration, `PUT .../like`, `PUT .../trash`, soft-delete `DELETE` + `?permanent=1` purge, Liked/Trash scopes + counts + article-page `TrashButton`. Integration fixes in the merge: like/trash writers under the store mutex, 30/min/IP limits on like/trash routes, trashed rows excluded from the Kindle batch, redundant list Delete button removed (Trash covers it).
-  - Still open: tags/folders, highlights + notes + export.
+  - Still open: tags/folders, highlights + notes + export. (Owner 2026-09-24: explicitly deprioritized — do not schedule.)
 - [~] **Reading extras:** EPUB/PDF export, estimated time left, e-ink mode, dyslexia font, translations/summaries (LLM).
   - [x] DONE 2026-09-12 (`7c58150`, `57913b1`): Send to Kindle — `lib/kindle.ts` (latest-50-active batch, compiled HTML doc with TOC, 40MB guard, injected sender + `setMailSenderOverride`), `POST /api/kindle/send` + `GET /api/kindle/status` (rate-limited, no secrets), library send button + toast (`app/page.tsx`), SMTP config via `.env.local` (`.env.example` setup doc).
 - [~] **Ops:** rate limiting, Sentry, E2E (Playwright) for extract+sync.
@@ -164,6 +164,7 @@ data/articles.json         # created at runtime
 - [x] 2026-09-23 (`0176cf6`): store write mutex + corrupt-JSON backup-and-reset (`lib/store.ts`).
 - [x] 2026-09-23 (`0c11b83`): library full-text search (`?q=`) + sort (`?sort=`).
 - [x] 2026-09-23 (`ae5444f`): starred/liked + trash (soft-delete, restore, purge).
+- [x] 2026-09-24: aggressive dedup normalization — scheme unified to https, host lowercased + `www.` dropped, tracking params stripped (`TRACKING_PARAM_NAMES` + `utm_`/`hsa_`), remaining params sorted; page-identifying params preserved (`lib/store.ts` `normalizeUrl`).
 
 ## 11. Risks
 

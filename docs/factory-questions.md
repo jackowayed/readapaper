@@ -47,6 +47,12 @@ progress/archive`, `DELETE`, `PUT like`) have no limiter. [Default: first
 
 - Q1 heading: `Library (N)` shows the filtered count while a search/sort is
   active, otherwise the scope count (Active/Archived/Liked/Trash).
+- Q1 dedup (owner 2026-09-24): aggressive normalization it is — scheme unified
+  to https, host lowercased + leading `www.` dropped, `TRACKING_PARAM_NAMES` +
+  `utm_`/`hsa_` prefixes stripped, remaining params sorted, page-identifying
+  params (`?page=`, `?id=`, …) always preserved.
+- Q3/Q9 tags/folders/highlights (owner 2026-09-24): explicitly deprioritized —
+  do not schedule; no crew should pick these up without a new owner decision.
 - Q2 trash: shipped soft-delete as default; list `Delete` button removed (Trash
   covers it) leaving Trash/Restore/Delete-forever; dedup ignores trashed rows
   (re-save creates fresh); `getArticle` still returns trashed rows for the

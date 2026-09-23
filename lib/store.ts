@@ -184,11 +184,100 @@ export async function getArticle(id: string): Promise<Article | null> {
   return all.find((a) => a.id === id) ?? null;
 }
 
-/** Canonical key for dedup: host lowercased, fragment stripped, trailing slash dropped. */
+/**
+ * Query params that never identify page content — marketing, analytics, and
+ * ad-click IDs. Anything NOT on this list (or matching a prefix below) is
+ * preserved, so site params like `?page=2`, `?id=123`, or `?story=slug`
+ * keep distinguishing pages.
+ */
+const TRACKING_PARAM_NAMES = new Set([
+  // Google / generic ads
+  "gclid",
+  "gclsrc",
+  "dclid",
+  "wbraid",
+  "gbraid",
+  "gad_source",
+  "srsltid",
+  // Meta
+  "fbclid",
+  "fb_action_ids",
+  "fb_action_types",
+  "fb_source",
+  "fb_ref",
+  // Microsoft / TikTok / Twitter / Yahoo / LinkedIn
+  "msclkid",
+  "ttclid",
+  "twclid",
+  "yclid",
+  "li_fat_id",
+  // Instagram / Mailchimp / Marketo / HubSpot / Vero / misc
+  "igshid",
+  "mc_cid",
+  "mc_eid",
+  "mkt_tok",
+  "hscam",
+  "hsctatracking",
+  "vero_conv",
+  "vero_id",
+  "dm_i",
+  "oly_anon_id",
+  "oly_enc_id",
+  "rb_clickid",
+  "c_id",
+  "_ga",
+  "_gl",
+  "_ke",
+  // Bare "ref" variants (share-tracking); namespaced or page-scoped
+  // ref-* params from specific sites are preserved.
+  "ref",
+  "ref_src",
+  "ref_source",
+  // Matomo / Piwik / Adobe Analytics campaign params
+  "pk_campaign",
+  "pk_kwd",
+  "pk_source",
+  "pk_medium",
+  "pk_content",
+  "piwik_campaign",
+  "piwik_kwd",
+  "piwik_source",
+  "piwik_medium",
+  "sc_campaign",
+  "sc_channel",
+  "sc_content",
+  "sc_medium",
+  "sc_outcome",
+  "sc_regionid",
+  "sc_trk",
+  "s_cid",
+]);
+
+/** Prefixes whose whole family is tracking (`utm_source`, `hsa_kw`, …). */
+const TRACKING_PARAM_PREFIXES = ["utm_", "hsa_"];
+
+function isTrackingParam(name: string): boolean {
+  const k = name.toLowerCase();
+  return TRACKING_PARAM_NAMES.has(k) || TRACKING_PARAM_PREFIXES.some((p) => k.startsWith(p));
+}
+
+/**
+ * Canonical key for dedup: scheme unified to https, host lowercased with
+ * leading `www.` dropped, fragment stripped, tracking params removed,
+ * remaining params sorted (order-insensitive), trailing slash dropped.
+ */
 export function normalizeUrl(url: string): string {
   try {
     const u = new URL(url);
     u.hash = "";
+    // http and https serve the same page for dedup purposes.
+    if (u.protocol === "http:" || u.protocol === "https:") u.protocol = "https:";
+    const host = u.hostname.toLowerCase();
+    u.hostname = host.startsWith("www.") ? host.slice(4) : host;
+    for (const key of [...u.searchParams.keys()]) {
+      if (isTrackingParam(key)) u.searchParams.delete(key);
+    }
+    u.searchParams.sort();
     let s = u.toString();
     if (s.endsWith("/") && u.pathname !== "/") s = s.slice(0, -1);
     return s;
