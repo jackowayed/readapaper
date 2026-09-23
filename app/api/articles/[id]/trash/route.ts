@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { setDeleted } from "@/lib/store";
+import { firstIssueMessage, TrashBodySchema } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -29,10 +30,11 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  if (typeof body.deleted !== "boolean") {
-    return NextResponse.json({ error: "Missing deleted" }, { status: 400 });
+  const parsed = TrashBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
   }
-  const updated = await setDeleted(id, body.deleted);
+  const updated = await setDeleted(id, parsed.data.deleted);
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true, deleted: updated.deleted });
 }

@@ -77,6 +77,8 @@ describe("PUT /api/articles/[id]/progress (offset)", () => {
       { progress: "half" },
       { progress: null },
       { offset: true, progress: "x" },
+      null,
+      [1],
     ]) {
       const res = await progressRoute.PUT(putReq(body), ctx(id));
       expect(res.status).toBe(400);

@@ -223,3 +223,28 @@ describe("corrupt JSON recovery", () => {
     expect(await store.listArticles()).toHaveLength(1);
   });
 });
+
+describe("row validation (zod)", () => {
+  it("ignores non-object rows instead of crashing", async () => {
+    const file = await dataFile();
+    const { article } = await store.createArticle(sample("https://example.com/a"));
+    const raw = JSON.parse(await fs.readFile(file, "utf8")) as unknown[];
+    await fs.writeFile(file, JSON.stringify([null, "junk", 42, ...raw]), "utf8");
+    const list = await store.listArticles();
+    expect(list.map((a) => a.id)).toEqual([article.id]);
+  });
+
+  it("quarantines rows that fail the article schema, keeps the rest", async () => {
+    const file = await dataFile();
+    const good = await store.createArticle(sample("https://example.com/good"));
+    const raw = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>[];
+    // progress:"half" would be repaired by migration (coerced to 0) — use
+    // damage migration cannot fix: null text and negative wordCount.
+    const bad = { ...raw[0], text: null };
+    const bad2 = { ...raw[0], id: "bad-2", url: "https://example.com/bad", wordCount: -3 };
+    await fs.writeFile(file, JSON.stringify([...raw, bad, bad2]), "utf8");
+    const list = await store.listArticles();
+    expect(list.map((a) => a.id)).toEqual([good.article.id]);
+    expect(await store.getArticle(good.article.id)).not.toBeNull();
+  });
+});

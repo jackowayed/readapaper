@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import type { Article, ArticleSummary } from "./types";
 import { countWords } from "./text";
 import { clampOffset, fractionToOffset, offsetToFraction } from "./progress-sync";
+import { ArticleSchema } from "./schemas";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "articles.json");
@@ -27,9 +28,17 @@ async function readAll(): Promise<Article[]> {
     const raw = await fs.readFile(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+    // Non-object rows (null, strings, …) can never migrate — drop them with
+    // a count instead of crashing every route on first property access.
+    const rows = (parsed as unknown[]).filter(
+      (row): row is Article => typeof row === "object" && row !== null
+    );
+    if (rows.length !== parsed.length) {
+      console.error(`[store] ignoring ${parsed.length - rows.length} non-object rows`);
+    }
     // Lazy migration: backfill canonical offset fields for rows written
     // before unified progress (in-memory only, no rewrite on load).
-    return (parsed as Article[]).map((a) => {
+    const migrated = rows.map((a) => {
       const textLength = typeof a.text === "string" ? a.text.length : 0;
       const progress = typeof a.progress === "number" ? a.progress : 0;
       const progressOffset =
@@ -61,6 +70,21 @@ async function readAll(): Promise<Article[]> {
         deletedAt,
       };
     });
+    // Schema gate: rows that still don't validate (hand-edited damage beyond
+    // what migration repairs) are quarantined with their id logged — serving
+    // a malformed row crashes renderers downstream, so fail safe, not loud.
+    // Note: the next write rewrites the file without quarantined rows.
+    const valid = migrated.filter((a) => {
+      if (ArticleSchema.safeParse(a).success) return true;
+      console.error(
+        `[store] quarantining invalid article row id=${typeof a.id === "string" ? a.id : "unknown"}`
+      );
+      return false;
+    });
+    if (valid.length !== migrated.length) {
+      console.error(`[store] quarantined ${migrated.length - valid.length} invalid article rows`);
+    }
+    return valid;
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
     if (e instanceof SyntaxError) {
@@ -331,6 +355,9 @@ async function createArticleUnsafe(input: {
     createdAt: now,
   };
   all.push(article);
+  // Defensive: constructed rows must satisfy the stored-row schema. A failure
+  // here is a server bug (not client input), so throwing to 500 is correct.
+  ArticleSchema.parse(article);
   await writeAll(all);
   return { article, created: true };
 }

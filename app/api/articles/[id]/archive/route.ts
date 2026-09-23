@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { setArchived } from "@/lib/store";
+import { ArchiveBodySchema, firstIssueMessage } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -29,10 +30,11 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  if (typeof body.archived !== "boolean") {
-    return NextResponse.json({ error: "Missing archived" }, { status: 400 });
+  const parsed = ArchiveBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
   }
-  const updated = await setArchived(id, body.archived);
+  const updated = await setArchived(id, parsed.data.archived);
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true, archived: updated.archived });
 }

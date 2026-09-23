@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { setLiked } from "@/lib/store";
+import { firstIssueMessage, LikeBodySchema } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -29,10 +30,11 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  if (typeof body.liked !== "boolean") {
-    return NextResponse.json({ error: "Missing liked" }, { status: 400 });
+  const parsed = LikeBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
   }
-  const updated = await setLiked(id, body.liked);
+  const updated = await setLiked(id, parsed.data.liked);
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true, liked: updated.liked });
 }

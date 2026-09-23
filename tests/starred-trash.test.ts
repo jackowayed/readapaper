@@ -194,7 +194,7 @@ describe("PUT /api/articles/[id]/like", () => {
 
   it("400 when liked is missing or not a boolean", async () => {
     const id = await savedId();
-    for (const body of [{}, { liked: "yes" }, { liked: 1 }, { liked: null }]) {
+    for (const body of [{}, { liked: "yes" }, { liked: 1 }, { liked: null }, null]) {
       const res = await likeRoute.PUT(putReq(body), ctx(id));
       expect(res.status).toBe(400);
     }
@@ -225,7 +225,7 @@ describe("trash routes (soft-delete, restore, purge)", () => {
   it("PUT /trash 400 on invalid JSON / non-boolean, 404 for missing id", async () => {
     expect((await trashRoute.PUT(putReq("{oops"), ctx("x"))).status).toBe(400);
     const id = await savedId();
-    for (const body of [{}, { deleted: "yes" }, { deleted: 1 }, { deleted: null }]) {
+    for (const body of [{}, { deleted: "yes" }, { deleted: 1 }, { deleted: null }, null]) {
       expect((await trashRoute.PUT(putReq(body), ctx(id))).status).toBe(400);
     }
     expect((await trashRoute.PUT(putReq({ deleted: true }), ctx("nope"))).status).toBe(404);

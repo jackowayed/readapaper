@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createArticle, listArticles, toSummary } from "@/lib/store";
 import type { SortKey } from "@/lib/store";
 import { extractFromHtml, extractFromUrl, assertSafeHttpUrl } from "@/lib/extract";
+import { firstIssueMessage, SaveBodySchema } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -122,6 +123,11 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
+  const parsed = SaveBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return json({ error: firstIssueMessage(parsed.error) }, 400);
+  }
+  body = parsed.data;
   try {
     if (body.html && typeof body.html === "string") {
       // Client-side extracted HTML path (bookmarklet / extension fallback for

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getArticle, updateProgressOffset } from "@/lib/store";
 import { fractionToOffset } from "@/lib/progress-sync";
+import { firstIssueMessage, ProgressBodySchema } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -30,15 +31,15 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const hasOffset = typeof body.offset === "number" && Number.isFinite(body.offset);
-  const hasProgress = typeof body.progress === "number" && Number.isFinite(body.progress);
-  if (!hasOffset && !hasProgress) {
-    return NextResponse.json({ error: "Missing progress" }, { status: 400 });
+  const parsed = ProgressBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
   }
+  body = parsed.data;
   // Canonical offset wins when both are present.
   let offset: number;
-  if (hasOffset) {
-    offset = body.offset as number;
+  if (body.offset !== undefined) {
+    offset = body.offset;
   } else {
     const article = await getArticle(id);
     if (!article) return NextResponse.json({ error: "Not found" }, { status: 404 });

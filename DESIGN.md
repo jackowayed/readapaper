@@ -165,6 +165,7 @@ data/articles.json         # created at runtime
 - [x] 2026-09-23 (`0c11b83`): library full-text search (`?q=`) + sort (`?sort=`).
 - [x] 2026-09-23 (`ae5444f`): starred/liked + trash (soft-delete, restore, purge).
 - [x] 2026-09-24: aggressive dedup normalization — scheme unified to https, host lowercased + `www.` dropped, tracking params stripped (`TRACKING_PARAM_NAMES` + `utm_`/`hsa_`), remaining params sorted; page-identifying params preserved (`lib/store.ts` `normalizeUrl`).
+- [x] 2026-09-24: zod request + store validation — `lib/schemas.ts` (extract/save/progress/archive/like/trash bodies, stored-row schema); routes answer 400 with legacy messages, `readAll` quarantines invalid rows, `createArticle` asserts constructed rows (`zod@4`).
 
 ## 11. Risks
 

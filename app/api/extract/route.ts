@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractFromUrl } from "@/lib/extract";
+import { ExtractBodySchema, firstIssueMessage } from "@/lib/schemas";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -38,17 +39,19 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  if (!body.url || typeof body.url !== "string") {
-    return NextResponse.json({ error: "Missing url" }, { status: 400 });
+  const parsed = ExtractBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
   }
+  const { url } = parsed.data;
   try {
-    const result = await extractFromUrl(body.url);
+    const result = await extractFromUrl(url);
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Extraction failed";
     const status = /Invalid|Only http|Blocked/.test(msg) ? 400 : 422;
     if (status === 422 || status >= 500) {
-      console.error(`[POST /api/extract] extraction failed host=${safeHost(body.url)} err=${msg}`);
+      console.error(`[POST /api/extract] extraction failed host=${safeHost(url)} err=${msg}`);
     }
     return NextResponse.json({ error: msg }, { status });
   }

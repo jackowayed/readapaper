@@ -59,6 +59,15 @@ describe("POST /api/articles", () => {
     expect(await res.json()).toEqual({ error: "Provide url or html" });
   });
 
+  it("400 on null/array/wrong-type bodies (schema, never 500)", async () => {
+    for (const body of [null, [1, 2], "https://example.com/a", 42, { url: 42 }, { html: 42 }]) {
+      const res = await articlesRoute.POST(postReq(body));
+      expect(res.status).toBe(400);
+    }
+    const wrongType = await articlesRoute.POST(postReq({ url: 42 }));
+    expect(await wrongType.json()).toEqual({ error: "Provide url or html" });
+  });
+
   it("422 when posted HTML exceeds 10MB", async () => {
     const res = await articlesRoute.POST(postReq({ html: "x".repeat(10_000_001) }));
     expect(res.status).toBe(422);
@@ -219,10 +228,12 @@ describe("PUT /api/articles/[id]/archive", () => {
 
   it("400 when archived is missing or not a boolean", async () => {
     const id = await savedId();
-    for (const body of [{}, { archived: "yes" }, { archived: 1 }, { archived: null }]) {
+    for (const body of [{}, { archived: "yes" }, { archived: 1 }, { archived: null }, null]) {
       const res = await archiveRoute.PUT(putReq(body), ctx(id));
       expect(res.status).toBe(400);
     }
+    const wrongType = await archiveRoute.PUT(putReq({ archived: 1 }), ctx(id));
+    expect(await wrongType.json()).toEqual({ error: "Missing archived" });
   });
 
   it("404 for a missing id", async () => {
