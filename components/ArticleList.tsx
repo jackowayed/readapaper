@@ -1,23 +1,67 @@
 "use client";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ArticleSummary } from "@/lib/types";
 import { readingMinutes } from "@/lib/text";
 
 export default function ArticleList({ articles }: { articles: ArticleSummary[] }) {
   const router = useRouter();
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  function clearError(id: string) {
+    setErrors((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function fail(id: string, action: string, status: number | null) {
+    setErrors((prev) => ({
+      ...prev,
+      [id]:
+        status === null
+          ? `${action} failed: network error. Try again.`
+          : `${action} failed (${status}). Try again.`,
+    }));
+  }
 
   async function onDelete(id: string) {
     if (!confirm("Delete this article?")) return;
-    await fetch(`/api/articles/${id}`, { method: "DELETE" });
+    clearError(id);
+    let res: Response;
+    try {
+      res = await fetch(`/api/articles/${id}`, { method: "DELETE" });
+    } catch {
+      fail(id, "Delete", null);
+      return;
+    }
+    if (!res.ok) {
+      fail(id, "Delete", res.status);
+      return;
+    }
     router.refresh();
   }
 
   async function onArchive(id: string, archived: boolean) {
-    await fetch(`/api/articles/${id}/archive`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ archived }),
-    });
+    clearError(id);
+    const action = archived ? "Archive" : "Unarchive";
+    let res: Response;
+    try {
+      res = await fetch(`/api/articles/${id}/archive`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived }),
+      });
+    } catch {
+      fail(id, action, null);
+      return;
+    }
+    if (!res.ok) {
+      fail(id, action, res.status);
+      return;
+    }
     router.refresh();
   }
 
@@ -51,6 +95,11 @@ export default function ArticleList({ articles }: { articles: ArticleSummary[] }
               </button>
             )}
           </div>
+          {errors[a.id] && (
+            <p className="error" role="alert">
+              {errors[a.id]}
+            </p>
+          )}
         </li>
       ))}
     </ul>

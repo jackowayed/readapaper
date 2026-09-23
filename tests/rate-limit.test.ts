@@ -11,6 +11,9 @@ let tmp = "";
 
 let articlesRoute: typeof import("../app/api/articles/route");
 let extractRoute: typeof import("../app/api/extract/route");
+let idRoute: typeof import("../app/api/articles/[id]/route");
+let progressRoute: typeof import("../app/api/articles/[id]/progress/route");
+let archiveRoute: typeof import("../app/api/articles/[id]/archive/route");
 let rl: typeof import("../lib/rate-limit");
 
 function fixture(name: string): string {
@@ -35,6 +38,26 @@ function extractReq(body: unknown, ip?: string): Request {
     headers,
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
+}
+
+function putReq(body: unknown, ip?: string): Request {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (ip) headers["x-forwarded-for"] = ip;
+  return new Request("http://localhost/", {
+    method: "PUT",
+    headers,
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
+
+function deleteReq(ip?: string): Request {
+  const headers: Record<string, string> = {};
+  if (ip) headers["x-forwarded-for"] = ip;
+  return new Request("http://localhost/", { method: "DELETE", headers });
+}
+
+function ctx(id: string) {
+  return { params: Promise.resolve({ id }) };
 }
 
 describe("checkRateLimit", () => {
@@ -114,6 +137,9 @@ describe("POST /api/articles rate limit", () => {
     vi.resetModules();
     articlesRoute = await import("../app/api/articles/route");
     extractRoute = await import("../app/api/extract/route");
+    idRoute = await import("../app/api/articles/[id]/route");
+    progressRoute = await import("../app/api/articles/[id]/progress/route");
+    archiveRoute = await import("../app/api/articles/[id]/archive/route");
     // Same module instance the routes use (imported after resetModules),
     // so the override hook below affects the routes under test.
     rl = await import("../lib/rate-limit");
@@ -213,5 +239,78 @@ describe("POST /api/articles rate limit", () => {
     } finally {
       errSpy.mockRestore();
     }
+  });
+});
+
+describe("mutation rate limits (progress/archive/delete)", () => {
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "readapaper-ratelimit-mut-"));
+    process.chdir(tmp);
+    vi.resetModules();
+    articlesRoute = await import("../app/api/articles/route");
+    idRoute = await import("../app/api/articles/[id]/route");
+    progressRoute = await import("../app/api/articles/[id]/progress/route");
+    archiveRoute = await import("../app/api/articles/[id]/archive/route");
+    rl = await import("../lib/rate-limit");
+  });
+
+  afterEach(async () => {
+    process.chdir(ORIG_CWD);
+    await fs.rm(tmp, { recursive: true, force: true });
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  async function savedId(url: string): Promise<string> {
+    const res = await articlesRoute.POST(articlesReq({ url, html: fixture("simple") }));
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("429s PUT progress after the limit, with Retry-After", async () => {
+    rl.setRateLimitOverride("articles-progress:7.7.7.7", 1, 60_000);
+    const id = await savedId("https://example.com/rl/progress");
+    const ok = await progressRoute.PUT(putReq({ offset: 3 }, "7.7.7.7"), ctx(id));
+    expect(ok.status).toBe(200);
+    const limited = await progressRoute.PUT(putReq({ offset: 4 }, "7.7.7.7"), ctx(id));
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "Rate limited, retry soon" });
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("429s PUT archive after the limit, with Retry-After", async () => {
+    rl.setRateLimitOverride("articles-archive:7.7.7.8", 1, 60_000);
+    const id = await savedId("https://example.com/rl/archive");
+    const ok = await archiveRoute.PUT(putReq({ archived: true }, "7.7.7.8"), ctx(id));
+    expect(ok.status).toBe(200);
+    const limited = await archiveRoute.PUT(putReq({ archived: false }, "7.7.7.8"), ctx(id));
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "Rate limited, retry soon" });
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("429s DELETE after the limit, with Retry-After (limiter runs before lookup)", async () => {
+    rl.setRateLimitOverride("articles-delete:7.7.7.9", 1, 60_000);
+    const id = await savedId("https://example.com/rl/delete");
+    const ok = await idRoute.DELETE(deleteReq("7.7.7.9"), ctx(id));
+    expect(ok.status).toBe(204);
+    // Same (now missing) id still 429s: the limiter runs before the store lookup.
+    const limited = await idRoute.DELETE(deleteReq("7.7.7.9"), ctx(id));
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "Rate limited, retry soon" });
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("mutation buckets are per-route and per-IP", async () => {
+    rl.setRateLimitOverride("articles-progress:9.9.9.9", 1, 60_000);
+    const id = await savedId("https://example.com/rl/buckets");
+    // Exhaust the progress bucket for one IP…
+    expect((await progressRoute.PUT(putReq({ offset: 1 }, "9.9.9.9"), ctx(id))).status).toBe(200);
+    expect((await progressRoute.PUT(putReq({ offset: 2 }, "9.9.9.9"), ctx(id))).status).toBe(429);
+    // …but archive (own bucket) and progress from another IP still pass.
+    expect((await archiveRoute.PUT(putReq({ archived: true }, "9.9.9.9"), ctx(id))).status).toBe(
+      200
+    );
+    expect((await progressRoute.PUT(putReq({ offset: 2 }, "9.9.9.10"), ctx(id))).status).toBe(200);
   });
 });

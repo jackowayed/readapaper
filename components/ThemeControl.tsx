@@ -74,9 +74,9 @@ export function useReadingProgress(
   onPositionRef.current = opts?.onPosition;
   const saved = useRef(false);
   useEffect(() => {
-    if (!saved.current && initial > 0 && initial < 0.95) {
+    if (!saved.current && initial > 0) {
       const h = document.documentElement.scrollHeight - window.innerHeight;
-      window.scrollTo(0, h * initial);
+      window.scrollTo(0, h * Math.min(1, initial));
       saved.current = true;
     }
   }, [initial]);

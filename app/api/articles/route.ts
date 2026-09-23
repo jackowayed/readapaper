@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createArticle, listArticles, toSummary } from "@/lib/store";
-import { extractFromHtml, extractFromUrl } from "@/lib/extract";
+import { extractFromHtml, extractFromUrl, assertSafeHttpUrl } from "@/lib/extract";
 import {
   checkRateLimit,
   DEFAULT_RATE_LIMIT,
@@ -46,9 +46,11 @@ export async function GET(req: Request) {
     const articles = await listArticles({ archived: true });
     return json(articles.map(toSummary));
   }
-  // Default "0" (active-only): missing, "0", or anything else.
-  const articles = await listArticles({ archived: false });
-  return json(articles.map(toSummary));
+  if (param === null || param === "0") {
+    const articles = await listArticles({ archived: false });
+    return json(articles.map(toSummary));
+  }
+  return json({ error: "Invalid archived param (expected 0, 1, or all)" }, 400);
 }
 
 export async function POST(req: Request) {
@@ -79,6 +81,15 @@ export async function POST(req: Request) {
         );
         return json({ error: "Page HTML too large (>10MB)" }, 422);
       }
+      if (typeof body.url === "string" && body.url) {
+        try {
+          assertSafeHttpUrl(body.url);
+        } catch (e) {
+          return json({ error: e instanceof Error ? e.message : "Invalid URL" }, 400);
+        }
+      }
+      // No url: keep the localhost fallback for parsing (extracted.url then
+      // persists as the fallback — pre-existing behavior, kept for minimal diff).
       const base = typeof body.url === "string" && body.url ? body.url : "https://localhost/";
       const extracted = extractFromHtml(body.html, base);
       const { article, created } = await createArticle(extracted);

@@ -101,6 +101,20 @@ test("reload restores read scroll silently", async ({ page, request }) => {
   await expect(page.getByText(/resume/i)).toHaveCount(0);
 });
 
+test("reload restores finished (>=95%) articles near the bottom", async ({ page, request }) => {
+  const { id, title } = await createArticle(request, "finished-restore");
+  const putRes = await request.put(`/api/articles/${id}/progress`, {
+    data: { progress: 0.97 },
+  });
+  expect(putRes.status()).toBe(200);
+
+  await page.goto(`/a/${id}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  // Finished articles restore too (previously >=95% dropped to top).
+  await expect.poll(async () => scrollFraction(page), { timeout: 10_000 }).toBeGreaterThan(0.9);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
 test("reload highlights listen offset silently (no autoplay)", async ({ page, request }) => {
   const { id, title, textLength } = await createArticle(request, "listen-restore");
   const mid = Math.floor(textLength / 2);

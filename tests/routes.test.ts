@@ -89,6 +89,26 @@ describe("POST /api/articles", () => {
     }
   });
 
+  it("400 when the html path carries an invalid/blocked base url", async () => {
+    for (const url of [
+      "ftp://example.com/file",
+      "http://localhost:3000/x",
+      "http://127.0.0.1/",
+      "not a url",
+    ]) {
+      const res = await articlesRoute.POST(postReq({ url, html: fixture("simple") }));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("201 for html-only posts (localhost parse fallback preserved)", async () => {
+    const res = await articlesRoute.POST(postReq({ html: fixture("simple") }));
+    expect(res.status).toBe(201);
+    const saved = (await res.json()) as { id: string; title: string };
+    expect(saved.id).toBeTruthy();
+    expect(saved.title).toBe("The Quiet Science of Reading on Screens");
+  });
+
   it("sends CORS headers for the bookmarklet cross-origin POST", async () => {
     const res = await articlesRoute.POST(
       postReq({ url: "https://example.com/a", html: fixture("simple") })
@@ -159,6 +179,22 @@ describe("GET /api/articles", () => {
       id: string;
     }[];
     expect(all.map((a) => a.id)).toEqual([saved.id]);
+  });
+
+  it("400 on invalid ?archived= values", async () => {
+    for (const query of [
+      "?archived=yes",
+      "?archived=2",
+      "?archived=true",
+      "?archived=TRUE",
+      "?archived=",
+    ]) {
+      const res = await articlesRoute.GET(getReq(query));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: "Invalid archived param (expected 0, 1, or all)",
+      });
+    }
   });
 });
 
