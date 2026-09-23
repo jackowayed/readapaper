@@ -26,10 +26,29 @@ describe("assertSafeHttpUrl", () => {
     "http://127.0.0.1/",
     "http://127.1.2.3:8080/a",
     "http://10.0.0.5/",
+    "http://172.16.0.1/",
+    "http://172.31.255.255/",
     "http://192.168.1.1/admin",
     "http://169.254.169.254/latest/meta-data",
     "http://metadata.google.internal/",
     "http://[::1]/x",
+    "http://[::]/",
+    "http://[0::0]/",
+    "http://[fe80::1]/",
+    "http://[fc00::1]/",
+    "http://[fd00::1]/",
+    "http://[::ffff:127.0.0.1]/",
+    "http://0.0.0.0/",
+    "http://0/",
+    // Decimal / octal / hex IPv4 encodings of loopback (and other blocked ranges).
+    "http://2130706433/",
+    "http://0x7f000001/",
+    "http://0177.0.0.1/",
+    "http://0x7f.0.0.1/",
+    "http://0x7f.1/",
+    "http://127.1/",
+    "http://10.1/",
+    "http://0x0a.0.0.1/",
   ])("blocks %s", (raw) => {
     expect(() => assertSafeHttpUrl(raw)).toThrow(/Blocked host/);
   });
@@ -52,6 +71,8 @@ describe("assertSafeHttpUrl", () => {
     "https://example.com/article",
     "http://example.com:8080/x?q=1#frag",
     "https://sub.domain.co.uk/a/b",
+    "http://172.15.255.255/",
+    "http://172.32.0.1/",
   ])("allows %s", (raw) => {
     expect(assertSafeHttpUrl(raw).toString()).toBe(new URL(raw).toString());
   });
@@ -78,11 +99,11 @@ describe("extractFromHtml", () => {
     const hrefs = [...doc.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     expect(hrefs).toContain("https://example.com/authors/jane");
     expect(hrefs).toContain("https://example.com/topics/reading");
-    // NOTE: absolutizeUrls sets target=_blank pre-sanitize, but the DOMPurify
-    // allowlist (lib/extract.ts ALLOWED_ATTR) strips target/rel. Locked as-is;
-    // follow-up: add target/rel to the allowlist or drop the dead code.
+    // absolutizeUrls sets target=_blank + rel=noopener noreferrer and the
+    // DOMPurify allowlist (lib/extract.ts ALLOWED_ATTR) keeps them.
     for (const a of doc.querySelectorAll("a")) {
-      expect(a.getAttribute("target")).toBeNull();
+      expect(a.getAttribute("target")).toBe("_blank");
+      expect(a.getAttribute("rel")).toBe("noopener noreferrer");
     }
   });
 
@@ -185,15 +206,58 @@ describe("extractFromUrl", () => {
 
   const okPage = (
     html: string,
-    contentType = "text/html; charset=utf-8",
-    url = "https://example.com/final"
+    contentType: string | null = "text/html; charset=utf-8",
+    url = "https://example.com/final",
+    contentLength: string | null = null
   ) => ({
     ok: true,
     status: 200,
     url,
-    headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? contentType : null) },
+    headers: {
+      get: (k: string) => {
+        const key = k.toLowerCase();
+        if (key === "content-type") return contentType;
+        if (key === "content-length") return contentLength;
+        return null;
+      },
+    },
     text: async () => html,
   });
+
+  const redirectTo = (location: string, url = "https://example.com/start") => ({
+    ok: false,
+    status: 302,
+    url,
+    headers: {
+      get: (k: string) => (k.toLowerCase() === "location" ? location : null),
+    },
+  });
+
+  /** Chunked-stream body mock for the incremental size-cap path. */
+  const streamPage = (
+    chunks: Uint8Array[],
+    contentType: string | null = "text/html; charset=utf-8",
+    url = "https://example.com/stream"
+  ) => {
+    let i = 0;
+    return {
+      ok: true,
+      status: 200,
+      url,
+      headers: {
+        get: (k: string) => (k.toLowerCase() === "content-type" ? contentType : null),
+      },
+      body: {
+        getReader: () => ({
+          read: async () =>
+            i < chunks.length
+              ? { done: false, value: chunks[i++]! }
+              : { done: true, value: undefined },
+          cancel: async () => {},
+        }),
+      },
+    };
+  };
 
   it("fetches, then extracts with the final response URL", async () => {
     stubFetch(() => okPage(loadFixture("simple")));
@@ -217,14 +281,131 @@ describe("extractFromUrl", () => {
     );
   });
 
+  it.each(["text/plain; charset=utf-8", "application/json", "image/png"])(
+    "rejects content-type %s",
+    async (contentType) => {
+      stubFetch(() => okPage("x", contentType));
+      await expect(extractFromUrl("https://example.com/x")).rejects.toThrow(
+        /Unsupported content-type/
+      );
+    }
+  );
+
+  it.each([
+    "text/html; charset=utf-8",
+    "text/html",
+    "application/xhtml+xml; charset=utf-8",
+    "application/xhtml+xml",
+    "Text/HTML; Charset=UTF-8",
+  ])("allows content-type %s", async (contentType) => {
+    stubFetch(() => okPage(loadFixture("simple"), contentType));
+    const r = await extractFromUrl("https://example.com/x");
+    expect(r.title).toBe("The Quiet Science of Reading on Screens");
+  });
+
+  it.each([null, ""])("allows missing/empty content-type (%s)", async (contentType) => {
+    stubFetch(() => okPage(loadFixture("simple"), contentType));
+    const r = await extractFromUrl("https://example.com/x");
+    expect(r.title).toBe("The Quiet Science of Reading on Screens");
+  });
+
   it("throws when the page exceeds 5MB", async () => {
     stubFetch(() => okPage("x".repeat(5_000_001)));
     await expect(extractFromUrl("https://example.com/huge")).rejects.toThrow(/too large/);
+  });
+
+  it("rejects an oversize Content-Length before reading the body", async () => {
+    let textCalled = false;
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      url: "https://example.com/big",
+      headers: {
+        get: (k: string) => {
+          const key = k.toLowerCase();
+          if (key === "content-length") return "5000001";
+          if (key === "content-type") return "text/html; charset=utf-8";
+          return null;
+        },
+      },
+      text: async () => {
+        textCalled = true;
+        return "x";
+      },
+    }));
+    await expect(extractFromUrl("https://example.com/big")).rejects.toThrow(/too large/);
+    expect(textCalled).toBe(false);
+  });
+
+  it("aborts a streaming body that exceeds 5MB mid-read", async () => {
+    const oneMB = new Uint8Array(1_000_000).fill(120); // "x"
+    stubFetch(() => streamPage([oneMB, oneMB, oneMB, oneMB, oneMB, oneMB]));
+    await expect(extractFromUrl("https://example.com/stream")).rejects.toThrow(/too large/);
+  });
+
+  it("extracts a streaming body that stays under 5MB", async () => {
+    const bytes = new TextEncoder().encode(loadFixture("simple"));
+    const mid = Math.floor(bytes.length / 2);
+    stubFetch(() => streamPage([bytes.slice(0, mid), bytes.slice(mid)]));
+    const r = await extractFromUrl("https://example.com/stream");
+    expect(r.title).toBe("The Quiet Science of Reading on Screens");
+    expect(r.url).toBe("https://example.com/stream");
   });
 
   it("validates the URL before fetching", async () => {
     const { calls } = stubFetch(() => okPage("x"));
     await expect(extractFromUrl("ftp://example.com/x")).rejects.toThrow(/Only http/);
     expect(calls).toHaveLength(0);
+  });
+
+  it("blocks a redirect to an internal host without following it", async () => {
+    const { calls } = stubFetch((url) =>
+      url === "https://example.com/start"
+        ? redirectTo("http://169.254.169.254/latest/meta-data")
+        : okPage("must not be fetched")
+    );
+    await expect(extractFromUrl("https://example.com/start")).rejects.toThrow(/Blocked host/);
+    expect(calls).toEqual(["https://example.com/start"]);
+  });
+
+  it("blocks a redirect to an internal host on a later hop", async () => {
+    const { calls } = stubFetch((url) => {
+      if (url === "https://example.com/start") return redirectTo("https://example.com/hop2");
+      if (url === "https://example.com/hop2") return redirectTo("http://127.0.0.1:8080/admin");
+      return okPage("must not be fetched");
+    });
+    await expect(extractFromUrl("https://example.com/start")).rejects.toThrow(/Blocked host/);
+    expect(calls).toEqual(["https://example.com/start", "https://example.com/hop2"]);
+  });
+
+  it("follows a relative Location against the current URL", async () => {
+    const { calls } = stubFetch((url) =>
+      url === "https://example.com/start" ? redirectTo("/final") : okPage(loadFixture("simple"))
+    );
+    const r = await extractFromUrl("https://example.com/start");
+    expect(calls).toEqual(["https://example.com/start", "https://example.com/final"]);
+    expect(r.title).toBe("The Quiet Science of Reading on Screens");
+    expect(r.url).toBe("https://example.com/final");
+  });
+
+  it("blocks a protocol-relative redirect to an internal host", async () => {
+    const { calls } = stubFetch((url) =>
+      url === "https://example.com/start"
+        ? redirectTo("//127.0.0.1/admin")
+        : okPage("must not be fetched")
+    );
+    await expect(extractFromUrl("https://example.com/start")).rejects.toThrow(/Blocked host/);
+    expect(calls).toEqual(["https://example.com/start"]);
+  });
+
+  it("rejects a redirect to a non-http(s) URL", async () => {
+    stubFetch(() => redirectTo("ftp://example.com/x"));
+    await expect(extractFromUrl("https://example.com/start")).rejects.toThrow(/Only http/);
+  });
+
+  it("gives up after too many redirects", async () => {
+    const { calls } = stubFetch((url) => redirectTo("https://example.com/loop", url));
+    await expect(extractFromUrl("https://example.com/loop")).rejects.toThrow(/Too many redirects/);
+    expect(calls).toHaveLength(6); // initial + 5 hops
   });
 });
