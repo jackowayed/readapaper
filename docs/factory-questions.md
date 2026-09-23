@@ -43,6 +43,22 @@ progress/archive`, `DELETE`, `PUT like`) have no limiter. [Default: first
     [Default: none in this batch; CSV import/export first (validates bulk
     pipeline), then share-target, then extension. No crew builds them yet.]
 
+## Decided during merge 2026-09-23 (supervisor — overturn explicitly)
+
+- Q1 heading: `Library (N)` shows the filtered count while a search/sort is
+  active, otherwise the scope count (Active/Archived/Liked/Trash).
+- Q2 trash: shipped soft-delete as default; list `Delete` button removed (Trash
+  covers it) leaving Trash/Restore/Delete-forever; dedup ignores trashed rows
+  (re-save creates fresh); `getArticle` still returns trashed rows for the
+  restore UI; Kindle batch excludes trashed rows.
+- Q6 rate limits: extended to like/trash routes too (`articles-like:`,
+  `articles-trash:` buckets); reads stay unlimited.
+- Q7 target/rel: allowlisted — reader links keep `target=_blank`.
+- Q8 scroll: restores any `progress > 0`, clamped to ≤1.
+- Integration: `setLiked`/`setDeleted` wrapped in the store mutex (they were
+  written pre-mutex and bypassed it); `onLike`/`onTrash`/`onDeleteForever`
+  surface errors like the other list actions.
+
 ## Decided already (locked — overturn explicitly)
 
 - One revertable unit per branch: `factory/<slug>` → squash to ONE commit on

@@ -41,8 +41,8 @@ How to use this file: check off boxes as work lands. Keep in sync with `DESIGN.m
 
 ## P1 — Correctness fixes (needs tests from P0)
 
-- [ ] SSRF: validate final `res.url` after redirects in `extractFromUrl`, not just initial URL; block `0.0.0.0`, `::`, decimal/octal IP forms; add redirect-to-internal fixture test
-- [ ] Store durability: in-process write mutex/queue in `lib/store.ts:21-26` to stop concurrent `POST` loss; add `zod` schema validation on read/write (`Article` shape, `progress 0..1`)
+- [x] SSRF: validate every `res.url`/hop after redirects in `extractFromUrl` (manual loop, max 5, per-hop `assertSafeHttpUrl`); block `0.0.0.0`, `::`, decimal/octal IP forms; strict content-type allowlist + Content-Length/streaming 5MB caps — DONE 2026-09-23 (`18e0748`, `lib/extract.ts` + `tests/extract.test.ts`, 74 extract tests). Still open: DNS-rebinding lookup-time guard.
+- [~] Store durability: in-process write mutex/queue in `lib/store.ts` to stop concurrent `POST` loss — DONE 2026-09-23 (`0176cf6`, `withLock` over create/delete/progress/archive; like/trash wrapped at merge `ae5444f`; concurrent-save repro tests). Corrupt-JSON backup-and-reset recovery included. Still open: `zod` schema validation on read/write (`Article` shape, `progress 0..1`).
 - [ ] Request validation: `zod` for `POST /api/articles`, `PUT progress` bodies (types, size caps 10MB html / 5MB fetch / 15s timeout already in `lib/extract.ts:176-202`)
 - [ ] Acceptance: concurrent-save repro test passes; SSRF bypass tests pass
 
@@ -71,3 +71,4 @@ npx playwright test   # e2e
 - [x] 2026-09-11: plan created — no code changed, `DESIGN.md` sync N/A (docs-only).
 - [x] 2026-09-11: P0 done — 79/79 vitest pass (~95% stmts on `lib/`), typecheck/lint/format/build green, CI added. Verified: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`. Remaining: branch protection (repo settings), P1 SSRF-redirect + store mutex/zod, P2 Playwright/rate-limit/Dependabot. Note: `target=_blank` set in `absolutizeUrls` is stripped by DOMPurify allowlist — decide to allowlist or remove (see P1).
 - [x] 2026-09-11: P2 done — Playwright e2e 4/4 green locally + separate CI job, 30 req/min/IP limits on both POSTs (13 unit tests), `console.error` host-only logging, Dependabot weekly + `npm audit --audit-level=critical` in CI, `TESTING.md`. Verified: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` (92/92), `npm run build`, `npm run test:e2e` (4/4). Remaining: branch protection (repo settings), P1 SSRF-redirect + store mutex/zod, Next 16 + readability 0.6.0 upgrades (1 high audit finding), `next`/`react` pin decision.
+- [x] 2026-09-23: factory batch — P1 SSRF-redirect + store mutex land, plus library search/sort + starred/trash. Verified on merged main: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test` (286/286), `npm run build`, `npm run test:e2e` (20/20), coverage 90.6% stmts on `lib/`. Remaining P1: DNS-rebinding guard, `zod` request/store validation; plus branch protection, Next 16 + readability upgrades.

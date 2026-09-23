@@ -144,16 +144,26 @@ data/articles.json         # created at runtime
 - [~] **Library features:** tags/folders, archive/favorites, full-text search (pg_trgm/meilisearch), highlights + notes + export.
   - [x] DONE 2026-09-12 (`0d814bf`): archive — `archived` + `archivedAt` on `Article`/`ArticleSummary` (lazy migration, preserves `progressOffset` fields), `setArchived` + `listArticles({archived})` in `lib/store.ts`, `PUT /api/articles/:id/archive`, `GET /api/articles?archived=1|0|all` (default active-only), Active|Archived toggle + Archive/Unarchive buttons (`app/page.tsx`, `components/ArticleList.tsx`).
   - [x] DONE 2026-09-13 (`d03cdba`): article-page header Archive/Unarchive toggle — `components/ArchiveButton.tsx` (client toggle via existing archive PUT + `router.refresh()`), generic `actions` slot in `components/SiteHeader.tsx` (`.topbar-right`), wired in `app/a/[id]/page.tsx`, header toggle e2e in `tests/e2e/archive.spec.ts`.
+  - [x] DONE 2026-09-23 (`0c11b83`): full-text search + sort — substring `?q=` over title/byline/excerpt/text/url + `?sort=newest|oldest|longest|shortest|progress` in `listArticles`/`GET /api/articles`, server search/sort form in `app/page.tsx` (scope-preserving links, `emptyLabel` in `ArticleList.tsx`); pg_trgm/Meili deferred to the Postgres migration.
+  - [x] DONE 2026-09-23 (`ae5444f`): starred/liked + trash — `liked`/`deleted` (+ `*At`) with lazy migration, `PUT .../like`, `PUT .../trash`, soft-delete `DELETE` + `?permanent=1` purge, Liked/Trash scopes + counts + article-page `TrashButton`. Integration fixes in the merge: like/trash writers under the store mutex, 30/min/IP limits on like/trash routes, trashed rows excluded from the Kindle batch, redundant list Delete button removed (Trash covers it).
+  - Still open: tags/folders, highlights + notes + export.
 - [~] **Reading extras:** EPUB/PDF export, estimated time left, e-ink mode, dyslexia font, translations/summaries (LLM).
   - [x] DONE 2026-09-12 (`7c58150`, `57913b1`): Send to Kindle — `lib/kindle.ts` (latest-50-active batch, compiled HTML doc with TOC, 40MB guard, injected sender + `setMailSenderOverride`), `POST /api/kindle/send` + `GET /api/kindle/status` (rate-limited, no secrets), library send button + toast (`app/page.tsx`), SMTP config via `.env.local` (`.env.example` setup doc).
 - [~] **Ops:** rate limiting, Sentry, E2E (Playwright) for extract+sync.
   - [x] DONE (v0 baseline): SSRF guard (`assertSafeHttpUrl` blocklist in `lib/extract.ts`) + size/time caps (5MB server fetch, 10MB posted HTML, 15s timeout).
   - [x] DONE 2026-09-11 (`e3a193e`): P0 quality gates — vitest unit suite (`tests/`, 79 tests, ~95% stmts on `lib/`) + `typecheck`/`eslint .`/`prettier` + CI (`.github/workflows/ci.yml`, Node 20/22) — `QUALITY_PLAN.md`, `vitest.config.ts`, `eslint.config.mjs`, `tsconfig.json`, `.prettierrc`, `.husky/`, `next.config.mjs` (`ignoreDuringBuilds: false`). E2E/rate-limit/Sentry still open.
   - [x] DONE 2026-09-11 (`8ec651d`): P2 — Playwright e2e (`tests/e2e/`, 4 tests: CRUD + bookmarklet-dedup/CORS, zero-residue via backup/restore) + separate CI `e2e` job; 30 req/min/IP limits on both POSTs (`lib/rate-limit.ts`, 429 + `Retry-After`) + host-only error logging; Dependabot weekly + `npm audit --audit-level=critical` in CI; `TESTING.md`. Sentry + `high`-level audit (postcss-via-Next, needs breaking Next major) still open.
+  - [x] DONE 2026-09-23 (`18e0748`): SSRF redirect hardening — manual redirect loop (max 5 hops) with per-hop `assertSafeHttpUrl`, `0.0.0.0`/`::`/decimal/octal/hex IP blocks, strict content-type allowlist, Content-Length pre-check + streaming 5MB cap; `target`/`rel` allowlisted so reader links keep `target=_blank`.
+  - [x] DONE 2026-09-23 (`0176cf6`): store durability — in-process promise-queue write mutex over all read-modify-write ops (create/delete/progress/archive/like/trash) + corrupt-`articles.json` backup-and-reset recovery. DNS-rebinding lookup-time guard + request-body `zod` validation still open.
+  - [x] DONE 2026-09-23 (`1ebb7dd`, `ae5444f`): mutation rate limits extended to all write routes (progress/archive/delete/like/trash, 429 + `Retry-After`); `GET ?archived=` rejects unknown values with 400; finished (≥95%) articles restore scroll; bookmarklet `{html}` path validates `url`.
 
 ## 10. Task list (live — updated as we go)
 
 - [ ]
+- [x] 2026-09-23 (`18e0748`): SSRF redirect-hop validation + IP/content-type/size-cap hardening (`lib/extract.ts`).
+- [x] 2026-09-23 (`0176cf6`): store write mutex + corrupt-JSON backup-and-reset (`lib/store.ts`).
+- [x] 2026-09-23 (`0c11b83`): library full-text search (`?q=`) + sort (`?sort=`).
+- [x] 2026-09-23 (`ae5444f`): starred/liked + trash (soft-delete, restore, purge).
 
 ## 11. Risks
 
