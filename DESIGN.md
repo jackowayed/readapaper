@@ -166,6 +166,9 @@ data/articles.json         # created at runtime
 - [x] 2026-09-23 (`ae5444f`): starred/liked + trash (soft-delete, restore, purge).
 - [x] 2026-09-24: aggressive dedup normalization — scheme unified to https, host lowercased + `www.` dropped, tracking params stripped (`TRACKING_PARAM_NAMES` + `utm_`/`hsa_`), remaining params sorted; page-identifying params preserved (`lib/store.ts` `normalizeUrl`).
 - [x] 2026-09-24: zod request + store validation — `lib/schemas.ts` (extract/save/progress/archive/like/trash bodies, stored-row schema); routes answer 400 with legacy messages, `readAll` quarantines invalid rows, `createArticle` asserts constructed rows (`zod@4`).
+- [x] 2026-09-24 (`574069c`): offline progress replays as canonical offsets (`sendOffset` + `getTextLength` in `lib/offline-flush.ts`).
+- [x] 2026-09-24 (`29f4206`): voice pitch control (persisted, mid-play apply) + preview button + iOS limitation note (downloaded voices unavailable to web — Apple restriction).
+- [x] 2026-09-24 (`f02a8b7`): listen queue — `lib/listen-queue.ts`, `/listen` continuous-play player advancing across articles, library add-to-queue + count link (Web Speech only, no server TTS per owner).
 
 ## 11. Risks
 

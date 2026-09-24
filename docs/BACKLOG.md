@@ -9,10 +9,9 @@ Big extensions also appear in `DESIGN.md` §9; ops leftovers in
 
 ## Bugs still open
 
-- [ ] **P1 — Offline replay loses offsets.** `components/OfflineSupport.tsx`
-      flushes the progress queue with a fraction-only sender, downgrading
-      canonical char-offsets (`lib/offline-queue.ts` supports an offset
-      sender). Fix: pass the offset sender. Small.
+- [x] ~~P1 — Offline replay loses offsets~~ — DONE 2026-09-24 (`574069c`):
+      `OfflineSupport` flushes via `sendOffset` + `getTextLength`
+      (`lib/offline-flush.ts`), legacy fraction fallback preserved.
 - [ ] **P1 — DNS-rebinding / lookup-time guard.** SSRF blocklist validates
       URL strings, but a hostname resolving to a private IP at fetch time
       (rebinding, internal DNS) is unchecked. Needs resolve-then-validate or
@@ -48,8 +47,16 @@ Big extensions also appear in `DESIGN.md` §9; ops leftovers in
       top of `lib/kindle.ts`; manual batch-send exists.
 - [ ] **Speed reading (RSVP)** (S). 1-word-at-a-time mode in
       `SyncedReader.tsx`; rate control exists.
-- [ ] **TTS playlist + server voices** (M-L). Queue N articles, continuous
-      play; blocked on server TTS audio (see `DESIGN.md` §9 Server TTS).
+- [x] ~~TTS playlist + server voices~~ (M-L) — owner: no server voices.
+      Shipped Web Speech article queue instead, DONE 2026-09-24 (`f02a8b7`):
+      `lib/listen-queue.ts` (localStorage order), `/listen` continuous-play
+      player, per-article "Add to queue" + queue count link. Follow-ups:
+      "Play next" per-article entry point, real-device iOS speak-chaining
+      check, spurious-`onEnded` generation counter (see crew notes).
+- [x] ~~Voice customization~~ — DONE 2026-09-24 (`29f4206`): pitch control
+      (0.5–2, persisted per-browser, applies mid-play), voice preview
+      button, honest iOS note (downloaded voices like Ava are not exposed
+      to web apps by Apple — platform restriction, no workaround).
 - [ ] **Browser extension / share sheet / mobile** (L). Bookmarklet covers
       desktop; share-target in the PWA manifest is the cheap mobile step.
 - [ ] **Videos, Kobo/ereader sync, public folders** (L). Needs multi-user +
