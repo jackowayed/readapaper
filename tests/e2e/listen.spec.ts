@@ -30,6 +30,8 @@ const SPEECH_MOCK = `(() => {
     cancels: 0,
     errorNext: null,
     spoken: [],
+    rates: [],
+    pitches: [],
   });
   let gen = 0;
   const synth = {
@@ -48,6 +50,8 @@ const SPEECH_MOCK = `(() => {
       const myGen = gen;
       st.speaks += 1;
       try { st.spoken.push(u.text); } catch {}
+      try { st.rates.push(u.rate ?? 1); } catch {}
+      try { st.pitches.push(u.pitch ?? 1); } catch {}
       this._speaking = true;
       this._paused = false;
       const err = st.errorNext;
@@ -97,6 +101,7 @@ const SPEECH_MOCK = `(() => {
     constructor(text) {
       this.text = text;
       this.rate = 1;
+      this.pitch = 1;
       this.voice = null;
       this.onboundary = null;
       this.onend = null;
@@ -260,12 +265,20 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   // Exact match: the Archive button's aria-label ("Archive <title>") also
   // contains the word "Voice" (e.g. the "voicesettings" test title).
   const voiceSelect = page.getByLabel("Voice", { exact: true });
+  const pitchSelect = page.getByLabel("Speech pitch");
 
-  // Persist rate + voice (localStorage = per-browser, works offline).
+  // Honest iOS limitation note is always visible under the voice controls.
+  await expect(page.getByText(/only listed voices can play/)).toBeVisible();
+
+  // Persist rate + pitch + voice (localStorage = per-browser, works offline).
   await rateSelect.selectOption("1.5");
+  await pitchSelect.selectOption("1.5");
   await voiceSelect.selectOption("mock-voice-2");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:rate")))
+    .toBe("1.5");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:pitch")))
     .toBe("1.5");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:voiceURI")))
@@ -304,10 +317,111 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
   await expect(rateSelect).toHaveValue("1.25");
+  await expect(pitchSelect).toHaveValue("1.5");
   await expect(voiceSelect).toHaveValue("mock-voice-2");
   await expect(page.getByTestId("listen-status")).toContainText("Idle");
   await expect(page.getByRole("button", { name: "▶ Listen" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
+});
+
+test("Pitch change restarts playback, preview leaves playhead alone", async ({ page, request }) => {
+  const { id, title } = await createArticle(request, "voicecustom");
+  const mockWithVoices = SPEECH_MOCK.replace(
+    "getVoices() { return []; },",
+    `getVoices() { return [{ voiceURI: "mock-voice-1", name: "Mock Voice One", lang: "en-US" }, { voiceURI: "mock-voice-2", name: "Mock Voice Two", lang: "en-GB" }]; },`
+  );
+  await page.addInitScript(mockWithVoices);
+  await page.goto(`/a/${id}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
+
+  const pitchSelect = page.getByLabel("Speech pitch");
+  const previewBtn = page.getByRole("button", { name: "Preview voice" });
+  const status = page.getByTestId("listen-status");
+  await expect(status).toContainText("Idle");
+  await expect(previewBtn).toBeEnabled();
+  await expect(page.getByText(/only listed voices can play/)).toBeVisible();
+
+  // Set a non-default pitch while idle — persists per browser.
+  await pitchSelect.selectOption("1.5");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:pitch")))
+    .toBe("1.5");
+
+  // Preview while idle: one extra speak, no cancel (no restart), playhead
+  // untouched, status stays Idle, sample text uses the current pitch.
+  const active = page.locator(".listen-text .w.active");
+  await expect(active.first()).toBeVisible({ timeout: 10_000 });
+  const idleActiveId = await active.first().getAttribute("id");
+  const idleStats = await page.evaluate(() => {
+    const s = (window as unknown as { __mockSpeech: { speaks: number; cancels: number } })
+      .__mockSpeech;
+    return { speaks: s.speaks, cancels: s.cancels };
+  });
+  await previewBtn.click();
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () => (window as unknown as { __mockSpeech: { speaks: number } }).__mockSpeech.speaks
+        ),
+      { timeout: 10_000 }
+    )
+    .toBe(idleStats.speaks + 1);
+  // No cancel → article queue was not restarted.
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __mockSpeech: { cancels: number } }).__mockSpeech.cancels
+    )
+  ).toBe(idleStats.cancels);
+  await expect(status).toContainText("Idle");
+  expect(await active.first().getAttribute("id")).toBe(idleActiveId);
+  const previewSample = await page.evaluate(() => {
+    const s = (window as unknown as { __mockSpeech: { spoken: string[]; pitches: number[] } })
+      .__mockSpeech;
+    return { text: s.spoken[s.spoken.length - 1], pitch: s.pitches[s.pitches.length - 1] };
+  });
+  expect(previewSample.text).toBe("Hello from Readapaper");
+  expect(previewSample.pitch).toBe(1.5);
+  // Preview never persists position.
+  expect(await serverOffset(request, id)).toBe(0);
+
+  // Start playback — preview is disabled while playing so the article
+  // utterance is never interrupted.
+  await page.getByRole("button", { name: "▶ Listen" }).click();
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  await expect(previewBtn).toBeDisabled();
+
+  // Pitch change mid-play restarts from the playhead (extra cancel) with
+  // the new pitch applied to subsequent utterances.
+  const cancelsBefore = await page.evaluate(
+    () => (window as unknown as { __mockSpeech: { cancels: number } }).__mockSpeech.cancels
+  );
+  await pitchSelect.selectOption("0.5");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () => (window as unknown as { __mockSpeech: { cancels: number } }).__mockSpeech.cancels
+        ),
+      { timeout: 10_000 }
+    )
+    .toBeGreaterThan(cancelsBefore);
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:pitch")))
+    .toBe("0.5");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const s = (window as unknown as { __mockSpeech: { pitches: number[] } }).__mockSpeech;
+        return s.pitches[s.pitches.length - 1];
+      })
+    )
+    .toBe(0.5);
+
+  await page.getByRole("button", { name: "⏸ Pause" }).click();
+  await expect(status).toContainText("Paused", { timeout: 10_000 });
 });
 
 test("Speech error surfaces with retry and keeps position", async ({ page, request }) => {

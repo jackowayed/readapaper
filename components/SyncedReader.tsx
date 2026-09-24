@@ -4,7 +4,7 @@ import { splitSentences, splitWords } from "@/lib/text";
 import { clampOffset } from "@/lib/progress-sync";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
 import { nextPlayPauseAction } from "@/lib/speech-queue";
-import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
+import { ALLOWED_PITCHES, loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
 
 /**
  * SyncedReader — Web Speech API driver (v0).
@@ -14,7 +14,7 @@ import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
  * - Click any word to seek. Firefox lacks word boundaries -> sentence fallback.
  * - Single Play/Pause toggle (no separate Stop — pausing keeps the position,
  *   resuming continues from it; click the first word to restart from the top).
- * - Voice settings (rate + voice) persist per-browser in localStorage
+ * - Voice settings (rate + pitch + voice) persist per-browser in localStorage
  *   (offline-safe) and apply immediately: changing them mid-play restarts
  *   from the current playhead with the new settings; while paused/idle the
  *   new settings apply to the next resume/start.
@@ -65,6 +65,7 @@ export default function SyncedReader({
   // back to defaults without touching window.
   const [voiceURI, setVoiceURI] = useState<string>(() => loadVoiceSettings().voiceURI);
   const [rate, setRate] = useState<number>(() => loadVoiceSettings().rate);
+  const [pitch, setPitch] = useState<number>(() => loadVoiceSettings().pitch);
   const [playing, setPlaying] = useState(false);
   // Audible player state (listen-reliability Phase 1): idle | playing |
   // paused | error, shown as a status line next to the controls. Silent
@@ -80,8 +81,8 @@ export default function SyncedReader({
   const [autoScroll, setAutoScroll] = useState(true);
 
   const queueRef = useRef<{ idx: number; speaking: boolean }>({ idx: 0, speaking: false });
-  const optsRef = useRef({ voiceURI, rate });
-  optsRef.current = { voiceURI, rate };
+  const optsRef = useRef({ voiceURI, rate, pitch });
+  optsRef.current = { voiceURI, rate, pitch };
   const pauseUntilRef = useRef(0);
   const activeOffsetRef = useRef<number | null>(null);
   activeOffsetRef.current = activeOffset;
@@ -150,7 +151,7 @@ export default function SyncedReader({
     if (!voices.length || !voiceURI) return;
     if (!voices.some((v) => v.voiceURI === voiceURI)) {
       setVoiceURI("");
-      saveVoiceSettings({ rate: optsRef.current.rate, voiceURI: "" });
+      saveVoiceSettings({ rate: optsRef.current.rate, pitch: optsRef.current.pitch, voiceURI: "" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voices]);
@@ -188,7 +189,7 @@ export default function SyncedReader({
   }, [activeWordStart, autoScroll]);
 
   const speakSentenceRange = useCallback(
-    (fromOffset: number, overrides?: { voiceURI?: string; rate?: number }) => {
+    (fromOffset: number, overrides?: { voiceURI?: string; rate?: number; pitch?: number }) => {
       if (!supported) return;
       const synth = window.speechSynthesis;
       // NOTE (listen-reliability suspect #1): cancel() immediately followed
@@ -199,6 +200,7 @@ export default function SyncedReader({
       synth.cancel();
       const vuri = overrides?.voiceURI ?? optsRef.current.voiceURI;
       const r = overrides?.rate ?? optsRef.current.rate;
+      const p = overrides?.pitch ?? optsRef.current.pitch;
       const voice = voices.find((v) => v.voiceURI === vuri) ?? null;
 
       let startIdx = sentences.findIndex((s) => fromOffset < s.end);
@@ -229,6 +231,7 @@ export default function SyncedReader({
         }
         const u = new SpeechSynthesisUtterance(utterText);
         u.rate = r;
+        u.pitch = p;
         if (voice) u.voice = voice;
         u.onboundary = (e: SpeechSynthesisEvent) => {
           // Chrome/Edge/Safari: e.name==='word' + charIndex. Firefox: sentence only.
@@ -314,21 +317,52 @@ export default function SyncedReader({
   function handleRateChange(next: number) {
     setRate(next);
     const voice = optsRef.current.voiceURI;
-    optsRef.current = { voiceURI: voice, rate: next };
-    saveVoiceSettings({ rate: next, voiceURI: voice });
+    const p = optsRef.current.pitch;
+    optsRef.current = { voiceURI: voice, rate: next, pitch: p };
+    saveVoiceSettings({ rate: next, pitch: p, voiceURI: voice });
     if (queueRef.current.speaking && statusRef.current === "playing") {
-      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: next, voiceURI: voice });
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: next, pitch: p, voiceURI: voice });
     }
   }
 
   function handleVoiceChange(nextURI: string) {
     setVoiceURI(nextURI);
     const r = optsRef.current.rate;
-    optsRef.current = { voiceURI: nextURI, rate: r };
-    saveVoiceSettings({ rate: r, voiceURI: nextURI });
+    const p = optsRef.current.pitch;
+    optsRef.current = { voiceURI: nextURI, rate: r, pitch: p };
+    saveVoiceSettings({ rate: r, pitch: p, voiceURI: nextURI });
     if (queueRef.current.speaking && statusRef.current === "playing") {
-      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, voiceURI: nextURI });
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, pitch: p, voiceURI: nextURI });
     }
+  }
+
+  function handlePitchChange(next: number) {
+    setPitch(next);
+    const voice = optsRef.current.voiceURI;
+    const r = optsRef.current.rate;
+    optsRef.current = { voiceURI: voice, rate: r, pitch: next };
+    saveVoiceSettings({ rate: r, pitch: next, voiceURI: voice });
+    if (queueRef.current.speaking && statusRef.current === "playing") {
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, pitch: next, voiceURI: voice });
+    }
+  }
+
+  // One-shot sample with the current voice/rate/pitch. Never touches the
+  // article queue, playhead (activeOffset), status, or persisted position:
+  // no cancel(), no onboundary/onend wiring. Disabled while playing so the
+  // article utterance is never interrupted; while paused/idle it speaks
+  // alongside (queued behind a paused synth) without moving the highlight.
+  function previewVoice() {
+    if (!supported) return;
+    if (queueRef.current.speaking && statusRef.current === "playing") return;
+    const synth = window.speechSynthesis;
+    const { voiceURI: vuri, rate: r, pitch: p } = optsRef.current;
+    const voice = voices.find((v) => v.voiceURI === vuri) ?? null;
+    const u = new SpeechSynthesisUtterance("Hello from Readapaper");
+    u.rate = r;
+    u.pitch = p;
+    if (voice) u.voice = voice;
+    synth.speak(u);
   }
 
   // OS-level stop keeps the position (same as pause) — there is no
@@ -416,6 +450,23 @@ export default function SyncedReader({
           </select>
         </label>
         <label>
+          Pitch{" "}
+          <select
+            value={pitch}
+            onChange={(e) => handlePitchChange(Number(e.target.value))}
+            aria-label="Speech pitch"
+          >
+            {ALLOWED_PITCHES.map((p) => (
+              <option key={p} value={p}>
+                {p}x
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={previewVoice} disabled={playing}>
+          Preview voice
+        </button>
+        <label>
           <input
             type="checkbox"
             checked={autoScroll}
@@ -434,6 +485,10 @@ export default function SyncedReader({
                 : "Idle"}
         </span>
       </div>
+      <p className="muted">
+        Downloaded iPhone voices (e.g. Ava) aren&apos;t exposed to web apps by iOS — only listed
+        voices can play.
+      </p>
 
       <div className="listen-text" role="article" aria-label="Sync text">
         {paragraphs.map((para, pi) => (
