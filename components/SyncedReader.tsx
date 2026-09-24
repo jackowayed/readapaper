@@ -30,11 +30,18 @@ export default function SyncedReader({
   title,
   startOffset,
   onPosition,
+  onEnded,
 }: {
   text: string;
   title?: string;
   startOffset?: number;
   onPosition?: (offset: number) => void;
+  /**
+   * Fired once when the sentence queue drains naturally (all utterances
+   * ended). NOT fired on pause, error, stop/cancel, or unmount — the queue
+   * player uses it to advance to the next article.
+   */
+  onEnded?: () => void;
 }) {
   const sentences = useMemo(() => splitSentences(text), [text]);
   const words = useMemo(() => splitWords(text), [text]);
@@ -92,6 +99,19 @@ export default function SyncedReader({
   // hide always flush the latest offset.
   const onPositionRef = useRef(onPosition);
   onPositionRef.current = onPosition;
+  // Natural-drain callback (queue advance). Ref pattern keeps the speak
+  // closure stable; only the drain path below invokes it.
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
+  // Guard against a trailing onend racing unmount (cancel in cleanup can
+  // still flush a queued end event in real browsers).
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const lastSentRef = useRef<number | null>(null);
   const lastSentAtRef = useRef(0);
   const pendingRef = useRef<number | null>(null);
@@ -218,6 +238,10 @@ export default function SyncedReader({
           // Keep an error state sticky: a trailing onend after onerror must
           // not overwrite it (browsers fire both).
           if (statusRef.current !== "error") setStatus("idle");
+          // Natural drain only: the queue was live and ran past the last
+          // sentence (not a pause/error/stop halt, which clears `speaking`
+          // first or never reaches the tail). Skip after unmount.
+          if (idx >= sentences.length && aliveRef.current) onEndedRef.current?.();
           return;
         }
         queueRef.current.idx = idx;

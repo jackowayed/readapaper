@@ -2,6 +2,7 @@ import Link from "next/link";
 import SaveForm from "@/components/SaveForm";
 import ArticleList from "@/components/ArticleList";
 import KindleSend from "@/components/KindleSend";
+import ListenQueueLink from "@/components/ListenQueueLink";
 import OfflineCacheButton from "@/components/OfflineCacheButton";
 import SiteHeader from "@/components/SiteHeader";
 import { listArticles, toSummary } from "@/lib/store";
@@ -111,6 +112,7 @@ export default async function Home({
         </p>
         <h2>Library ({headingCount})</h2>
         <KindleSend />
+        <ListenQueueLink />
         <nav aria-label="Library filter">
           <Link
             href={libraryHref("active")}

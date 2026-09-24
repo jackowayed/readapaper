@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ArticleSummary } from "@/lib/types";
 import { readingMinutes } from "@/lib/text";
+import { enqueue, QUEUE_CHANGE_EVENT, readQueue } from "@/lib/listen-queue";
 
 export default function ArticleList({
   articles,
@@ -13,6 +14,26 @@ export default function ArticleList({
 }) {
   const router = useRouter();
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Queued ids for the per-article "Add to queue" labels (idempotent:
+  // re-adding is a no-op in lib). Same-tab mutations broadcast, so this
+  // stays fresh when the queue changes elsewhere.
+  const [queuedIds, setQueuedIds] = useState<string[]>([]);
+  useEffect(() => {
+    const refresh = () => setQueuedIds(readQueue());
+    refresh();
+    window.addEventListener(QUEUE_CHANGE_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener(QUEUE_CHANGE_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  function onQueue(id: string) {
+    setQueuedIds(enqueue(id));
+  }
 
   function clearError(id: string) {
     setErrors((prev) => {
@@ -164,6 +185,9 @@ export default function ArticleList({
                 Delete forever
               </button>
             )}
+            <button onClick={() => onQueue(a.id)} aria-label={`Add to queue ${a.title}`}>
+              {queuedIds.includes(a.id) ? "✓ Queued" : "+ Queue"}
+            </button>
           </div>
           {errors[a.id] && (
             <p className="error" role="alert">
