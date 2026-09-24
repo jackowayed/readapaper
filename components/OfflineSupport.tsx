@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { flushPendingProgress, readPendingProgress } from "@/lib/offline-queue";
+import { buildOffsetSender, buildTextLengthResolver } from "@/lib/offline-flush";
 import { OFFLINE_READY_EVENT, readOfflineReady } from "@/lib/offline-cache";
 
 /**
@@ -24,14 +25,21 @@ export default function OfflineSupport() {
 
     async function flush() {
       try {
-        const { remaining } = await flushPendingProgress(async (id, progress) => {
-          const res = await fetch(`/api/articles/${id}/progress`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ progress }),
-          });
-          return res;
-        });
+        const { remaining } = await flushPendingProgress(
+          async (id, progress) => {
+            const res = await fetch(`/api/articles/${id}/progress`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ progress }),
+            });
+            return res;
+          },
+          undefined,
+          {
+            sendOffset: buildOffsetSender(),
+            getTextLength: buildTextLengthResolver(),
+          }
+        );
         setPending(remaining.length);
       } catch {
         // stay queued

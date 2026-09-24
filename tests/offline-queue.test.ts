@@ -11,6 +11,7 @@ import {
   removePendingProgress,
   type QueueStorage,
 } from "../lib/offline-queue";
+import { buildOffsetSender, buildTextLengthResolver } from "../lib/offline-flush";
 
 function memStorage(): QueueStorage & { dump(): unknown } {
   const map = new Map<string, string>();
@@ -244,5 +245,115 @@ describe("offline progress queue (offsets)", () => {
     const q = readPendingProgress(s);
     expect(q.find((e) => e.id === "k")).toMatchObject({ offset: 5, progress: 0.5 });
     expect(q.find((e) => e.id === "l")?.offset).toBeUndefined();
+  });
+});
+
+describe("offline flush wiring (OfflineSupport senders)", () => {
+  function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): ((
+    input: string,
+    init?: RequestInit
+  ) => Promise<Response>) & {
+    calls: Array<{ url: string; init?: RequestInit }>;
+  } {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fn = async (input: string, init?: RequestInit) => {
+      calls.push({ url: input, init });
+      return handler(input, init);
+    };
+    return Object.assign(fn, { calls });
+  }
+
+  it("buildOffsetSender PUTs the canonical { offset } body", async () => {
+    const fetchStub = stubFetch(() => new Response(null, { status: 200 }));
+    const sendOffset = buildOffsetSender(fetchStub);
+    const res = await sendOffset("abc", 7);
+    expect(res.ok).toBe(true);
+    expect(fetchStub.calls).toHaveLength(1);
+    expect(fetchStub.calls[0]?.url).toBe("/api/articles/abc/progress");
+    expect(fetchStub.calls[0]?.init?.method).toBe("PUT");
+    expect(fetchStub.calls[0]?.init?.headers).toEqual({
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(fetchStub.calls[0]?.init?.body))).toEqual({ offset: 7 });
+  });
+
+  it("buildTextLengthResolver resolves text.length", async () => {
+    const fetchStub = stubFetch(
+      () => new Response(JSON.stringify({ text: "0123456789" }), { status: 200 })
+    );
+    await expect(buildTextLengthResolver(fetchStub)("abc")).resolves.toBe(10);
+    expect(fetchStub.calls[0]?.url).toBe("/api/articles/abc");
+  });
+
+  it("buildTextLengthResolver returns undefined on non-ok, network failure, or missing text", async () => {
+    const notOk = stubFetch(() => new Response("nope", { status: 404 }));
+    await expect(buildTextLengthResolver(notOk)("a")).resolves.toBeUndefined();
+
+    const down = stubFetch(() => {
+      throw new Error("offline");
+    });
+    await expect(buildTextLengthResolver(down)("a")).resolves.toBeUndefined();
+
+    const missing = stubFetch(() => new Response(JSON.stringify({}), { status: 200 }));
+    await expect(buildTextLengthResolver(missing)("a")).resolves.toBeUndefined();
+
+    const nonString = stubFetch(() => new Response(JSON.stringify({ text: 42 }), { status: 200 }));
+    await expect(buildTextLengthResolver(nonString)("a")).resolves.toBeUndefined();
+  });
+
+  it("wired flush replays offset entries as { offset } and converts legacy fractions", async () => {
+    const s = memStorage();
+    s.setItem(PENDING_PROGRESS_KEY, JSON.stringify([{ id: "old", progress: 0.5, updatedAt: "t" }]));
+    enqueueProgressOffset(s, "new", 3, 10);
+    const puts: Array<{ url: string; body: unknown }> = [];
+    const fetchStub = stubFetch((url, init) => {
+      if (url.endsWith("/progress")) {
+        puts.push({ url, body: JSON.parse(String(init?.body)) });
+        return new Response(null, { status: 200 });
+      }
+      return new Response(JSON.stringify({ text: "0123456789" }), { status: 200 });
+    });
+    const legacyCalls: Array<[string, number]> = [];
+    const { flushed } = await flushPendingProgress(
+      async (id, progress) => {
+        legacyCalls.push([id, progress]);
+        return { ok: true };
+      },
+      s,
+      {
+        sendOffset: buildOffsetSender(fetchStub),
+        getTextLength: buildTextLengthResolver(fetchStub),
+      }
+    );
+    expect(flushed).toBe(2);
+    expect(legacyCalls).toEqual([]);
+    expect(puts).toContainEqual({ url: "/api/articles/old/progress", body: { offset: 5 } });
+    expect(puts).toContainEqual({ url: "/api/articles/new/progress", body: { offset: 3 } });
+    expect(readPendingProgress(s)).toEqual([]);
+  });
+
+  it("wired flush falls back to the fraction path when the resolver fails", async () => {
+    const s = memStorage();
+    s.setItem(PENDING_PROGRESS_KEY, JSON.stringify([{ id: "old", progress: 0.5, updatedAt: "t" }]));
+    const fetchStub = stubFetch((url) => {
+      if (url.endsWith("/progress")) return new Response(null, { status: 200 });
+      return new Response("gone", { status: 404 });
+    });
+    const legacyCalls: Array<[string, number]> = [];
+    const { flushed } = await flushPendingProgress(
+      async (id, progress) => {
+        legacyCalls.push([id, progress]);
+        return { ok: true };
+      },
+      s,
+      {
+        sendOffset: buildOffsetSender(fetchStub),
+        getTextLength: buildTextLengthResolver(fetchStub),
+      }
+    );
+    expect(flushed).toBe(1);
+    expect(legacyCalls).toEqual([["old", 0.5]]);
+    // Only the GET attempt ran; no offset PUT was issued.
+    expect(fetchStub.calls.map((c) => c.url)).toEqual(["/api/articles/old"]);
   });
 });
