@@ -237,4 +237,15 @@ button:disabled {
   gap: 0.5rem;
   margin: 1rem 0;
   font-family: system-ui, sans-serif;
+  position: sticky;
+  top: 65px;
+  background: var(--bg);
+  z-index: 6;
+  padding: 0.5rem 0;
+}
+/* In listen mode the toggle and the player controls are both sticky: stack
+   the player below the toggle instead of overlapping it (which hid the
+   Read button and forced a scroll-to-top trip). */
+.mode-toggle + section .controls {
+  top: 130px;
 }

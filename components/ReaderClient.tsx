@@ -4,7 +4,7 @@ import type { Article } from "@/lib/types";
 import SyncedReader from "./SyncedReader";
 import { useReadingProgress } from "./ThemeControl";
 import { persistProgressOffset } from "@/lib/offline-queue";
-import { clampOffset, offsetToFraction } from "@/lib/progress-sync";
+import { clampOffset, fractionToOffset, offsetToFraction } from "@/lib/progress-sync";
 
 /** Shared offline-safe sender for read + listen: PUT `{ offset }`, queued on failure. */
 function sendOffset(id: string, offset: number) {
@@ -39,6 +39,25 @@ export default function ReaderClient({ article }: { article: Article }) {
     onPosition: handlePosition,
   });
 
+  // Read -> listen handoff: capture the live scroll position synchronously.
+  // `offset` state only updates on the throttled (600ms) scroll handler, so a
+  // fast scroll-then-tap would otherwise hand a stale anchor to SyncedReader.
+  // Reading the DOM here also makes the handoff independent of scroll: the
+  // sticky toggle means no scroll-to-top trip that would persist ~0 and wipe
+  // the remembered cursor.
+  const switchToListen = useCallback(() => {
+    try {
+      const h = document.documentElement.scrollHeight - window.innerHeight;
+      if (h > 0) {
+        const p = Math.min(1, Math.max(0, window.scrollY / h));
+        handlePosition(fractionToOffset(p, textLength));
+      }
+    } catch {
+      // DOM read failed (SSR/test) — fall back to the last known offset.
+    }
+    setMode("listen");
+  }, [handlePosition, textLength]);
+
   // listen -> read handoff: after the article HTML remounts, scroll to the
   // last listen offset. (Skipped on first mount — the hook restores there.
   // The hook also ignores scroll events for ~1s after this programmatic
@@ -62,7 +81,7 @@ export default function ReaderClient({ article }: { article: Article }) {
         <button className={mode === "read" ? "primary" : ""} onClick={() => setMode("read")}>
           📖 Read
         </button>
-        <button className={mode === "listen" ? "primary" : ""} onClick={() => setMode("listen")}>
+        <button className={mode === "listen" ? "primary" : ""} onClick={switchToListen}>
           🎧 Listen in sync
         </button>
       </div>

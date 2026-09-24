@@ -177,6 +177,48 @@ test("mode toggle preserves the anchor both ways", async ({ page, request }) => 
     .toBeLessThan(expected + 0.12);
 });
 
+test("listen toggle is reachable mid-article without losing progress", async ({
+  page,
+  request,
+}) => {
+  const { id, title } = await createArticle(request, "sticky-toggle");
+  await page.goto(`/a/${id}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  if (!(await page.evaluate(() => "speechSynthesis" in window))) {
+    test.skip(true, "speechSynthesis unavailable in this browser");
+    return;
+  }
+
+  // Scroll mid-article and let the throttled hook persist the anchor.
+  await page.evaluate(() => {
+    const h = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo(0, h * 0.5);
+  });
+  await expect.poll(async () => serverOffset(request, id), { timeout: 15_000 }).toBeGreaterThan(0);
+  const saved = await serverOffset(request, id);
+
+  // The toggle sticks below the topbar, so it stays in the viewport
+  // mid-article — no scroll-to-top trip that would persist ~0.
+  const toggle = page.getByRole("button", { name: "🎧 Listen in sync" });
+  await expect(toggle).toBeVisible();
+  const inViewport = await toggle.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.top >= 0 && r.bottom <= window.innerHeight;
+  });
+  expect(inViewport).toBe(true);
+
+  // Switch directly from mid-article: highlight lands on the saved word and
+  // the stored offset is not clobbered back to the top.
+  await toggle.click();
+  const active = page.locator(".listen-text .w.active");
+  await expect(active).toBeVisible({ timeout: 10_000 });
+  const wordStart = Number((await active.getAttribute("id"))?.replace("w-", ""));
+  expect(wordStart).toBeLessThanOrEqual(saved);
+  expect(saved - wordStart).toBeLessThan(500);
+  await page.waitForTimeout(1500);
+  expect(await serverOffset(request, id)).toBeGreaterThan(saved * 0.5);
+});
+
 test("offline scroll write replays on reconnect", async ({ page, request, context }) => {
   const { id, title, textLength } = await createArticle(request, "offline-replay");
   await page.goto(`/a/${id}`);
