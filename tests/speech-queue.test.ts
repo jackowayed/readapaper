@@ -3,6 +3,7 @@ import {
   advanceUtterance,
   buildUtterance,
   findStartSentence,
+  isCanceledSpeechError,
   needsRestartAfterPause,
   nextPlayPauseAction,
   resolveBoundary,
@@ -319,7 +320,7 @@ describe("SpeechQueue driver (mocked speechSynthesis)", () => {
     const synth = mockSynth(calls);
     const q = new SpeechQueue({ sentences: SENTENCES, synth, events: { onError } });
     q.start(0);
-    q.handleError();
+    expect(q.handleError("synthesis-failed")).toBe(true);
     expect(q.state.speaking).toBe(false);
     expect(onError).toHaveBeenCalledOnce();
     expect(q.handleEnd()).toBeNull();
@@ -329,6 +330,27 @@ describe("SpeechQueue driver (mocked speechSynthesis)", () => {
     q2.stop();
     expect(q2.state.speaking).toBe(false);
     expect(calls[calls.length - 1]).toBe("cancel");
+  });
+
+  it("ignores cancel-driven errors (rate change / seek mid-play)", () => {
+    expect(isCanceledSpeechError("interrupted")).toBe(true);
+    expect(isCanceledSpeechError("canceled")).toBe(true);
+    expect(isCanceledSpeechError("cancelled")).toBe(true);
+    expect(isCanceledSpeechError("synthesis-failed")).toBe(false);
+    expect(isCanceledSpeechError(undefined)).toBe(false);
+
+    // A stale utterance's interrupted error after start() (our own
+    // cancel→speak for a rate/voice change) must not halt the new queue.
+    const calls: string[] = [];
+    const onError = vi.fn();
+    const synth = mockSynth(calls);
+    const q = new SpeechQueue({ sentences: SENTENCES, synth, events: { onError } });
+    q.start(0);
+    expect(q.handleError("interrupted")).toBe(false);
+    expect(q.handleError("canceled")).toBe(false);
+    expect(q.state.speaking).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    expect(q.handleEnd()?.sentenceIndex).toBe(1);
   });
 
   it("keeps the retry offset on error (no auto-advance after halt)", () => {

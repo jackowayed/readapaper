@@ -32,6 +32,7 @@ const SPEECH_MOCK = `(() => {
     spoken: [],
   });
   let gen = 0;
+  let current = null;
   const synth = {
     __isMock: true,
     _paused: false,
@@ -41,13 +42,26 @@ const SPEECH_MOCK = `(() => {
     getVoices() { return []; },
     addEventListener() {},
     removeEventListener() {},
-    cancel() { gen += 1; st.cancels += 1; this._speaking = false; this._paused = false; },
+    cancel() {
+      gen += 1; st.cancels += 1; this._speaking = false; this._paused = false;
+      // Real-browser fidelity: Chrome fires onerror({error:'interrupted'})
+      // (+ a trailing onend) on the cancelled in-flight utterance, Safari
+      // 'canceled'. Deliver unguarded by gen — the app must ignore stale
+      // generations / cancel codes (rate change / seek mid-play stays
+      // Playing, never flips to Error).
+      const u = current; current = null;
+      if (u && u.onerror) {
+        setTimeout(() => { try { u.onerror({ error: "interrupted" }); } catch {} }, 0);
+        setTimeout(() => { try { if (u.onend) u.onend(); } catch {} }, 5);
+      }
+    },
     pause() { this._paused = true; },
     resume() { this._paused = false; },
     speak(u) {
       const myGen = gen;
       st.speaks += 1;
       try { st.spoken.push(u.text); } catch {}
+      current = u;
       this._speaking = true;
       this._paused = false;
       const err = st.errorNext;
@@ -56,6 +70,7 @@ const SPEECH_MOCK = `(() => {
       if (err) {
         step(() => {
           this._speaking = false;
+          if (current === u) current = null;
           try { if (u.onerror) u.onerror({ error: err }); } catch {}
           step(() => { try { if (u.onend) u.onend(); } catch {} }, 5);
         }, 20);
@@ -77,6 +92,7 @@ const SPEECH_MOCK = `(() => {
           step(fireNext, 25);
         } else {
           this._speaking = false;
+          if (current === u) current = null;
           try { if (u.onend) u.onend(); } catch {}
         }
       };
@@ -293,6 +309,13 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("readapaper:tts:rate")))
     .toBe("1.25");
+
+  // Regression: real browsers fire onerror({error:'interrupted'}) on the
+  // cancelled utterance — a mid-play rate change must stay Playing, never
+  // flip to "Error — Speech error: interrupted".
+  await page.waitForTimeout(500);
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  await expect(status).not.toContainText("Error");
 
   // Pause keeps the highlight (no destructive stop-reset); reload restores
   // the saved settings silently with no autoplay and still no Stop.

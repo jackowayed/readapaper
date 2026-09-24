@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitSentences, splitWords } from "@/lib/text";
 import { clampOffset } from "@/lib/progress-sync";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
-import { nextPlayPauseAction } from "@/lib/speech-queue";
+import { nextPlayPauseAction, isCanceledSpeechError } from "@/lib/speech-queue";
 import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
 
 /**
@@ -87,6 +87,11 @@ export default function SyncedReader({
   const [autoScroll, setAutoScroll] = useState(true);
 
   const queueRef = useRef<{ idx: number; speaking: boolean }>({ idx: 0, speaking: false });
+  // Generation counter: bumped on every speakSentenceRange (cancel→speak).
+  // Real browsers fire onerror({error:'interrupted'/'canceled'}) + onend on
+  // the cancelled in-flight utterance; the stale closures must ignore them
+  // so a rate/voice change or seek mid-play doesn't flip Playing → Error.
+  const speakGenRef = useRef(0);
   const optsRef = useRef({ voiceURI, rate });
   optsRef.current = { voiceURI, rate };
   const pauseUntilRef = useRef(0);
@@ -216,6 +221,11 @@ export default function SyncedReader({
       // utterance. Phase 0 confirmed the pattern is present but the race did
       // NOT repro in headless Chromium, so per spec §5 we ship surfacing
       // only and keep this call order unchanged.
+      // Bump the generation BEFORE cancel: the cancelled utterance's async
+      // onerror('interrupted'/'canceled') + onend belong to the old
+      // generation and are ignored below.
+      speakGenRef.current += 1;
+      const gen = speakGenRef.current;
       synth.cancel();
       const vuri = overrides?.voiceURI ?? optsRef.current.voiceURI;
       const r = overrides?.rate ?? optsRef.current.rate;
@@ -255,6 +265,7 @@ export default function SyncedReader({
         u.rate = r;
         if (voice) u.voice = voice;
         u.onboundary = (e: SpeechSynthesisEvent) => {
+          if (gen !== speakGenRef.current) return;
           // Chrome/Edge/Safari: e.name==='word' + charIndex. Firefox: sentence only.
           const rel = typeof e.charIndex === "number" ? e.charIndex : 0;
           const global = utterStart + rel;
@@ -264,12 +275,19 @@ export default function SyncedReader({
           if (sIdx !== -1) setActiveSentence(sIdx);
         };
         u.onend = () => {
+          if (gen !== speakGenRef.current) return;
           // Ignore trailing ends after pause/error so an error stays visible
           // for retry instead of flipping back to idle.
           if (!queueRef.current.speaking || statusRef.current === "error") return;
           speakIdx(idx + 1, sentences[idx + 1]?.start ?? utterStart);
         };
         u.onerror = (ev: SpeechSynthesisErrorEvent) => {
+          if (gen !== speakGenRef.current) return;
+          const code = (ev as SpeechSynthesisErrorEvent | undefined)?.error;
+          // Our own cancel() (rate/voice change, seek, restart) surfaces as
+          // 'interrupted' (Chrome) / 'canceled' (Safari) on the replaced
+          // utterance — never a real failure, stay Playing.
+          if (isCanceledSpeechError(code)) return;
           queueRef.current.speaking = false;
           setPlaying(false);
           // Position (activeOffset) is deliberately kept for retry.

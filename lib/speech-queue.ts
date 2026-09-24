@@ -7,6 +7,8 @@
  * - mid-sentence seeks slice the first utterance, later ones speak whole
  * - whitespace-only sentences are skipped, `onend` advances to next
  * - every `start()` issues `cancel()` synchronously before `speak()`
+ * - cancel-driven errors ("interrupted"/"canceled") are benign and ignored;
+ *   SyncedReader additionally guards stale utterances by generation
  *
  * Zero DOM / Web Speech dependencies: the synth is injected via the
  * `QueueSynth` interface so tests run under node with a recording mock.
@@ -129,6 +131,17 @@ export type PlayPauseStatus = "idle" | "playing" | "paused" | "error";
 export type PlayPauseIntent = "pause" | "resume" | "restart" | "start";
 
 /**
+ * Cancel-driven error codes fired by `synth.cancel()` on the in-flight
+ * utterance — "interrupted" in Chrome, "canceled" in Safari ("cancelled"
+ * seen in some Chromium builds). These mean "we replaced the queue"
+ * (rate/voice change, seek, restart), not a real synthesis failure, and
+ * must never surface as an error state.
+ */
+export function isCanceledSpeechError(error: unknown): boolean {
+  return error === "interrupted" || error === "canceled" || error === "cancelled";
+}
+
+/**
  * Pure play/pause toggle decision for `SyncedReader.onPlayPause`.
  *
  * The previous implementation derived the UI state by reading
@@ -234,11 +247,17 @@ export class SpeechQueue {
     return next;
   }
 
-  /** Speech error: halt the queue (mirrors u.onerror -> playing=false). */
-  handleError(): void {
+  /** Speech error: halt the queue (mirrors u.onerror -> playing=false).
+   * Cancel-driven codes ("interrupted"/"canceled") from our own cancel()
+   * are benign and ignored — the caller restarted the queue and the stale
+   * utterance's error must not surface. Returns true when the error
+   * halted the queue, false when ignored. */
+  handleError(error?: unknown): boolean {
+    if (isCanceledSpeechError(error)) return false;
     this.state.speaking = false;
     this.current = null;
     this.events.onError?.();
+    return true;
   }
 
   /** Stop button: halt + cancel (mirrors onStop). */
