@@ -16,7 +16,6 @@ Single-user, local, web-only Instapaper clone. No auth, no accounts, no paid/ser
   - Produces title, byline, excerpt, sanitized reader HTML, plain text, word count.
 - Duplicate handling: re-saving an existing canonical URL returns the stored article with `200` instead of creating a duplicate (`201` for new saves).
   - Canonicalization: scheme unified to https, host lowercased with `www.` dropped, fragment stripped, tracking params removed (`utm_*`, `hsa_*`, ad-click IDs, etc.), remaining params sorted, trailing slash dropped. Page-identifying params are preserved.
-- Preview-only extraction endpoint exists (`POST /api/extract`) that returns extracted content without saving.
 
 ## 2. Library (`/`)
 
