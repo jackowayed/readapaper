@@ -169,6 +169,7 @@ data/articles.json         # created at runtime
 - [x] 2026-09-24 (`574069c`): offline progress replays as canonical offsets (`sendOffset` + `getTextLength` in `lib/offline-flush.ts`).
 - [x] 2026-09-24 (`29f4206`): voice pitch control (persisted, mid-play apply) + preview button + iOS limitation note (downloaded voices unavailable to web — Apple restriction).
 - [x] 2026-09-24 (`f02a8b7`): listen queue — `lib/listen-queue.ts`, `/listen` continuous-play player advancing across articles, library add-to-queue + count link (Web Speech only, no server TTS per owner).
+- [x] 2026-10-02 (`9f2bc1c`): prod-only service worker — register/unregister gated by env (`lib/sw-register.ts` + `tests/sw-register.test.ts`), dev pre-hydration unregister in `app/layout.tsx`, offline warm button hidden in dev. Fixes recurring dev soft-refresh `reading 'call'` crash from a production worker controlling `next dev` on the same origin (localhost:3000).
 
 ## 11. Risks
 
