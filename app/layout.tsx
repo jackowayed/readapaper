@@ -21,9 +21,17 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Never worker-control non-production origins: dev self-heal for browsers
+  // holding a production worker from a previous `next start` on the same
+  // origin (localhost:3000). Inline on purpose — it must run at HTML parse,
+  // before hydration: a page crashing on mixed-vintage chunks never runs
+  // React effects, so the OfflineSupport cleanup alone can't rescue it.
+  const devUnregister =
+    'if("serviceWorker" in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}';
   return (
     <html lang="en">
       <body>
+        {process.env.NODE_ENV !== "production" && <script>{devUnregister}</script>}
         <div className="shell">
           <OfflineSupport />
           {children}

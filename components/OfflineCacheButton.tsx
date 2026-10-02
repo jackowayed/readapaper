@@ -14,6 +14,9 @@ export default function OfflineCacheButton() {
   const ran = useRef(false);
 
   const warm = useCallback(async (quiet = false) => {
+    // No service worker outside production (lib/sw-register.ts unregisters
+    // leftovers in dev) — nothing to warm through, so skip the fan-out.
+    if (process.env.NODE_ENV !== "production") return;
     if (!("serviceWorker" in navigator) || !navigator.onLine) {
       if (!("serviceWorker" in navigator)) setState("unsupported");
       return;
@@ -83,6 +86,9 @@ export default function OfflineCacheButton() {
   }, [warm]);
 
   if (state === "unsupported") return null;
+  // The control only warms the service-worker cache, which does not exist
+  // outside production — hide it instead of reporting misleading counts.
+  if (process.env.NODE_ENV !== "production") return null;
 
   const label =
     state === "warming"
