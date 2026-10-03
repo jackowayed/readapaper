@@ -23,7 +23,9 @@ Next.js API Routes (Node server)
   CRUD /api/articles (JSON file store in `data/articles.json`)
     |
     v
-Web Speech API (client-only TTS, speechSynthesis + onboundary)
+Web Speech API (client-only system TTS, speechSynthesis + onboundary) +
+optional offline eSpeak voice (mespeak bundled JS -> per-sentence WAV ->
+single `<audio>` element) for background/lock-screen play
 ```
 
 No external DB, no S3, no auth in v0. Storage layer is abstracted (`lib/store.ts`) so it can swap to Postgres later without touching routes.
@@ -95,7 +97,16 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 - Auto-scroll: `activeSpan.scrollIntoView({block:'center'})`, paused 3s after manual scroll.
 - Click word -> cancel queue, restart from that sentence/word offset. Links navigate while paused, seek while playing.
 
-Limitations accepted in v0: voice quality varies, no background iOS play, no exact seek within sentence, no offline audio file.
+Limitations accepted in v0: system voice quality varies, system voice has no background iOS play (use the Offline engine below), no exact seek within sentence, no offline audio file.
+
+### Client-side offline voice (shipped 2026-10-03, see §10)
+
+Opt-in "Offline — plays locked" engine in the listen bar (`lib/tts-engine.ts` persistence, default stays system):
+
+- Bundled eSpeak (`mespeak@2`, GPL) lazily dynamic-imported on first offline Play (~1.4MB split chunks — initial bundle unchanged); no network TTS, works offline after first load.
+- `lib/mespeak-tts.ts` synthesizes each sentence slice to WAV (`rawdata: 'array'`, never touches audio APIs — DOM-free/testable); `lib/wav.ts` parses duration from the RIFF header (text-estimate fallback); `lib/audio-queue.ts` mirrors `speech-queue` slice semantics + uniform-time offset estimation + cache keys.
+- `UnifiedReader` plays sentences sequentially through one hidden `<audio>` element (blob URLs, 60-entry LRU session cache, next-sentence prefetch, `playbackRate` for tempo + wpm for later sentences) — the only client-side path iOS keeps alive on lock / in background. Highlight interpolates off `timeupdate` (sentence-level, like the Firefox fallback); progress persistence, Media Session lock-screen controls, and queue auto-advance are shared with the system path.
+- Trade-offs accepted: robotic English only, sync CPU synthesis per sentence (~100-300ms, prefetched), no word timestamps (uniform interpolation), queue auto-advance relies on sticky media engagement.
 
 ### Prod upgrade path (not in v0, see §9):
 
@@ -137,7 +148,8 @@ data/articles.json         # created at runtime
   - [x] DONE 2026-09-11 (`bbcc071`): asset prefetch for all same-origin HTML fetches (not just navigations — covers the warmer's `/`), `?v=`-stripped cache keys for `/_next/static/` so dev restarts don't orphan cached CSS.
   - [x] DONE 2026-09-11 (`ca62d69`): replaced the hand-rolled worker with Serwist (`serwist@9` + `@serwist/next@9`) — `app/sw.ts` (typed, linted) with build-time precache manifest (23 entries incl. global CSS + `/offline` fallback), `defaultCache` runtime recipes (documents/API/images network-first/SWR with expiration), one-time `readapaper-v1/v2` cache cleanup. Warming, progress queue, and banner UI unchanged (SW-agnostic); e2e now runs `next start` on a prebuilt app since the worker only activates on prod builds.
   - [x] DONE 2026-09-13 (`48daf83`): warm on every library load + warm-on-save — dropped the 10-min `shouldWarm` throttle (stale `0 articles` label, newest article never cached after `router.refresh()` soft refresh), `SaveForm` fires `warmOfflineCache()` after each save, failed warms keep the last good count instead of persisting 0, same-tab `OFFLINE_READY_EVENT` keeps button/banner counts live — `lib/offline-cache.ts`, `components/OfflineCacheButton.tsx`, `components/SaveForm.tsx`, `components/OfflineSupport.tsx`, `tests/offline-cache.test.ts`.
-  - Still open: true background audio (Web Speech suspends in background — needs server TTS audio files, see Server TTS item); IndexedDB mirror (SW Cache Storage covers reads for now).
+  - [x] DONE 2026-10-03 (`4d459b3`): client-side background audio without server TTS — opt-in Offline engine (`lib/tts-engine.ts`, `lib/mespeak-tts.ts`, `lib/wav.ts`, `lib/audio-queue.ts`, bundled eSpeak `mespeak@2` lazy chunk) synthesizing per-sentence WAV into a single `<audio>` element in `components/UnifiedReader.tsx` (persists across lock/app-switch, shared progress + Media Session controls); unit tests (`tests/tts-engine|wav|audio-queue|mespeak-tts.test.ts`, incl. real-synthesis integration) + e2e `tests/e2e/offline-voice.spec.ts` (real blob playback, highlight, persistence).
+  - Still open: server TTS for natural voices (see Server TTS item); IndexedDB mirror (SW Cache Storage covers reads for now).
 - [~] **Paywall/bot handling:** headless fetch (Playwright), readability fallback to Jina/trafilatura, image proxy + caching.
   - [x] DONE 2026-09-10 (`e3cdc80`): bookmarklet covers soft-paywall/login-gated/bot-blocked pages that render in the user's browser (hard paywalls that never render DOM text still unsavable — documented on `/bookmarklet`).
   - [x] DONE 2026-09-10 (`b28930c`): responsive/lazy image restoration in `lib/extract.ts` — `srcset`/`data-srcset` picking (~960px preferred), `data-src`/`data-original`/lazy attrs, `<picture><source>` fallback, placeholder (`data:`/`blob:`) drop, pre-Readability pass so src-less `<img>` survive.
@@ -173,9 +185,12 @@ data/articles.json         # created at runtime
 - [x] 2026-10-03 (`68b9bda`): dev passthrough SW stub via `middleware.ts` (`lib/sw-dev-stub.ts` + tripwire tests) — replaces the env-gating helper + inline script (net −61 lines); client registration back to one unconditional line, correct in every env.
 - [x] 2026-10-03 (`a31e3a6`): bounded + debounced cache warming — per-article fan-out chunked at `WARM_CONCURRENCY` (4), fingerprint skip when the article set is unchanged, partial warms retry (closes BACKLOG warmer fan-out suspect).
 - [x] 2026-10-03 (`2bccff0`, `585ac05`, `2c45440`): unified read+listen view — no mode toggle; `components/UnifiedReader.tsx` renders sanitized HTML with per-word spans (`lib/html-tokenize.ts`) and highlights TTS in place via `lib/html-sync.ts` offset alignment; first Play captures live scroll, scroll writes pause while playing, links navigate while paused / seek while playing; `/listen` queue renders the same view; `components/SyncedReader.tsx` + `components/ReaderClient.tsx` deleted — `app/a/[id]/page.tsx`, `components/ListenQueuePlayer.tsx`, `app/globals.css` (`.listen-bar` sticky, `.article-body .w` highlight), `tests/e2e/listen.spec.ts`, `tests/e2e/progress-sync.spec.ts`, `tests/html-sync.test.ts`, `tests/tokenize.test.ts`.
+- [x] 2026-10-03 (`4d459b3`): client-side offline voice — opt-in Offline engine keeps playing locked/backgrounded (bundled eSpeak -> WAV -> `<audio>`).
 
 ## 11. Risks
 
 - `speechSynthesis.onboundary` missing in Firefox -> fallback sentence highlight (handled).
 - Chrome 15s pause bug for long utterances -> mitigated by sentence-chunk queue.
 - SSRF via URL fetch -> protocol/host blocklist + size/time caps (v0 basic).
+
+Deviations from plan: `mespeak@2` npm dep for the offline voice (GPL-licensed eSpeak port — bundled client-side, no server); lazy split chunks (~1.4MB on first offline Play, precache/runtime caching unchanged); no new config or gitignored paths.

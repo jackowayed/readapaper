@@ -32,8 +32,9 @@ No manual server boot needed: the Playwright config's `webServer` starts
 `npm run build` first (the service worker only activates on prod builds).
 The suite runs on **chromium** and covers save URL -> list -> read `/a/[id]`
 -> progress resume -> trash/restore/purge, the bookmarklet `POST {url,html}`
-flow (incl. trashed-URL re-save), archive/like scopes, listen word-sync, and
-unified read/listen progress sync.
+flow (incl. trashed-URL re-save), archive/like scopes, listen word-sync, the
+offline voice engine (real bundled synthesis -> blob `<audio>` playback +
+highlight + engine persistence), and unified read/listen progress sync.
 
 The offline spec (`tests/e2e/offline.spec.ts`) covers the PWA shell:
 `/manifest.webmanifest` + `/sw.js` served, `rel="manifest"` on `/`, `/offline`
