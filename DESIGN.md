@@ -170,6 +170,8 @@ data/articles.json         # created at runtime
 - [x] 2026-09-24 (`29f4206`): voice pitch control (persisted, mid-play apply) + preview button + iOS limitation note (downloaded voices unavailable to web — Apple restriction).
 - [x] 2026-09-24 (`f02a8b7`): listen queue — `lib/listen-queue.ts`, `/listen` continuous-play player advancing across articles, library add-to-queue + count link (Web Speech only, no server TTS per owner).
 - [x] 2026-10-02 (`9f2bc1c`): prod-only service worker — register/unregister gated by env (`lib/sw-register.ts` + `tests/sw-register.test.ts`), dev pre-hydration unregister in `app/layout.tsx`, offline warm button hidden in dev. Fixes recurring dev soft-refresh `reading 'call'` crash from a production worker controlling `next dev` on the same origin (localhost:3000).
+- [x] 2026-10-03 (`68b9bda`): dev passthrough SW stub via `middleware.ts` (`lib/sw-dev-stub.ts` + tripwire tests) — replaces the env-gating helper + inline script (net −61 lines); client registration back to one unconditional line, correct in every env.
+- [x] 2026-10-03 (`a31e3a6`): bounded + debounced cache warming — per-article fan-out chunked at `WARM_CONCURRENCY` (4), fingerprint skip when the article set is unchanged, partial warms retry (closes BACKLOG warmer fan-out suspect).
 
 ## 11. Risks
 

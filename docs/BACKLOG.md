@@ -24,9 +24,10 @@ Big extensions also appear in `DESIGN.md` §9; ops leftovers in
 - [ ] **Suspect — Kindle reuses legacy `html` unescaped.** Rows written
       before server-side sanitize could carry unsanitized HTML into
       `compileKindleHtml`. Verify + test. Small.
-- [ ] **Suspect — offline warmer fan-out.** `lib/offline-cache.ts`
-      `Promise.allSettled` over all articles is unbounded. Cap concurrency.
-      Small.
+- [x] ~~Suspect — offline warmer fan-out~~ — DONE 2026-10-03 (`a31e3a6`):
+      chunked fan-out at `WARM_CONCURRENCY` (4) + fingerprint debounce (skip
+      when the article set is unchanged; partial warms persist no fingerprint,
+      so failures retry). Small.
 
 ## Features (ranked by user value, effort in parens)
 
