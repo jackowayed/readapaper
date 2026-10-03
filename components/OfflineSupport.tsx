@@ -3,12 +3,15 @@ import { useEffect, useState } from "react";
 import { flushPendingProgress, readPendingProgress } from "@/lib/offline-queue";
 import { buildOffsetSender, buildTextLengthResolver } from "@/lib/offline-flush";
 import { OFFLINE_READY_EVENT, readOfflineReady } from "@/lib/offline-cache";
-import { syncServiceWorker } from "@/lib/sw-register";
 
 /**
- * Production-only service-worker registration, then flushes queued progress
- * writes whenever the browser comes back online. Also surfaces connectivity +
- * pending count so readers know their position will sync later.
+ * Registers /sw.js once, then flushes queued progress writes whenever the
+ * browser comes back online. Also surfaces connectivity + pending count so
+ * readers know their position will sync later.
+ *
+ * Environment safety lives in one place: outside production `middleware.ts`
+ * serves a passthrough stub at /sw.js (lib/sw-dev-stub.ts), so registering
+ * here is correct in every env — dev pages can never be served stale assets.
  */
 export default function OfflineSupport() {
   const [online, setOnline] = useState(true);
@@ -20,14 +23,9 @@ export default function OfflineSupport() {
     setPending(readPendingProgress().length);
     setReady(readOfflineReady()?.count ?? 0);
 
-    // Production-only worker (lib/sw-register.ts): a worker registered by a
-    // production run would otherwise keep controlling `next dev` on the same
-    // origin and serve mixed-vintage chunks — soft-refresh crashes that a
-    // hard refresh hides. Outside production, unregister leftovers instead.
-    void syncServiceWorker(
-      "serviceWorker" in navigator ? navigator.serviceWorker : undefined,
-      process.env.NODE_ENV
-    ).catch(() => {});
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
 
     async function flush() {
       try {
