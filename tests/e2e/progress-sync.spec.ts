@@ -2,10 +2,10 @@ import { expect, test } from "@playwright/test";
 import { promises as fs } from "fs";
 import path from "path";
 
-// Unified read/listen progress (docs/unified-progress.md Phase 4): one
-// canonical char offset owned by ReaderClient, restored silently in read
-// (scroll) + listen (highlight) modes, preserved across mode toggles, and
-// queued offline / replayed on reconnect.
+// Unified read/listen progress: one article view, one canonical char offset.
+// Scrolling persists while idle/paused; the playhead persists while playing
+// (same endpoint, last-writer-wins). Reload restores scroll + highlight
+// silently in that same view — no mode toggle, no handoff trip.
 //
 // Serial (workers: 1 in playwright.config.ts — the JSON store has no write
 // mutex), unique URLs per run, and only a handful of requests per test so the
@@ -115,79 +115,78 @@ test("reload restores finished (>=95%) articles near the bottom", async ({ page,
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("reload highlights listen offset silently (no autoplay)", async ({ page, request }) => {
-  const { id, title, textLength } = await createArticle(request, "listen-restore");
-  const mid = Math.floor(textLength / 2);
-  const put = await request.put(`/api/articles/${id}/progress`, { data: { offset: mid } });
+test("reload highlights the saved position silently in the same view (no autoplay)", async ({
+  page,
+  request,
+}) => {
+  const { id, title } = await createArticle(request, "listen-restore");
+  const put = await request.put(`/api/articles/${id}/progress`, {
+    data: { progress: 0.5 },
+  });
   expect(put.status()).toBe(200);
+  const mid = await serverOffset(request, id);
 
   await page.goto(`/a/${id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  if (!(await page.evaluate(() => "speechSynthesis" in window))) {
-    test.skip(true, "speechSynthesis unavailable in this browser");
-    return;
-  }
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
-  // Saved word is highlighted immediately, without pressing play.
-  const active = page.locator(".listen-text .w.active");
-  await expect(active).toBeVisible({ timeout: 10_000 });
-  const raw = await active.getAttribute("id");
-  const wordStart = Number(raw?.replace("w-", ""));
-  expect(wordStart).toBeLessThanOrEqual(mid);
-  expect(mid - wordStart).toBeLessThan(500);
+  // The saved word is highlighted in the article itself, without pressing play.
+  const active = page.locator(".article-body .w.active");
+  await expect(active.first()).toBeVisible({ timeout: 10_000 });
   // No autoplay: the player still offers Listen, never Pause.
   await expect(page.getByRole("button", { name: "▶ Listen" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pause/ })).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Single view: there is no mode toggle anymore.
+  await expect(page.getByRole("button", { name: "🎧 Listen in sync" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "📖 Read" })).toHaveCount(0);
+  expect(mid).toBeGreaterThan(0);
 });
 
-test("mode toggle preserves the anchor both ways", async ({ page, request }) => {
-  const { id, title, textLength } = await createArticle(request, "handoff");
+test("reading then listening keeps the same position (no handoff trip)", async ({
+  page,
+  request,
+}) => {
+  const { id, title } = await createArticle(request, "handoff");
   await page.goto(`/a/${id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  if (!(await page.evaluate(() => "speechSynthesis" in window))) {
-    test.skip(true, "speechSynthesis unavailable in this browser");
-    return;
-  }
+  await expect(page.locator(".article-body .w").first()).toBeVisible({ timeout: 10_000 });
 
-  // Read: scroll mid-article; the throttled (600ms) hook persists the offset.
+  // Read: scroll mid-article; the throttled hook persists the offset.
   await page.evaluate(() => {
     const h = document.documentElement.scrollHeight - window.innerHeight;
     window.scrollTo(0, h * 0.5);
   });
   await expect.poll(async () => serverOffset(request, id), { timeout: 15_000 }).toBeGreaterThan(0);
   const saved = await serverOffset(request, id);
+  const beforeFraction = await scrollFraction(page);
 
-  // read -> listen: highlight lands on the saved word.
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
-  const active = page.locator(".listen-text .w.active");
-  await expect(active).toBeVisible({ timeout: 10_000 });
-  const wordStart = Number((await active.getAttribute("id"))?.replace("w-", ""));
-  expect(wordStart).toBeLessThanOrEqual(saved);
-  expect(saved - wordStart).toBeLessThan(500);
+  // Press Play in place: the highlight lands near the saved read position
+  // and the page does not jump (same view, no remount).
+  await page.getByRole("button", { name: "▶ Listen" }).click();
+  await expect(page.getByTestId("listen-status")).toContainText(/Playing|Error/, {
+    timeout: 15_000,
+  });
+  const active = page.locator(".article-body .w.active");
+  await expect(active.first()).toBeVisible({ timeout: 10_000 });
+  const afterFraction = await scrollFraction(page);
+  expect(Math.abs(afterFraction - beforeFraction)).toBeLessThan(0.25);
+  expect(saved).toBeGreaterThan(0);
 
-  // listen -> read: scroll returns to the saved offset's fraction.
-  await page.getByRole("button", { name: "📖 Read" }).click();
-  const expected = saved / Math.max(1, textLength);
-  await expect
-    .poll(async () => scrollFraction(page), { timeout: 10_000 })
-    .toBeGreaterThan(expected - 0.12);
-  await expect
-    .poll(async () => scrollFraction(page), { timeout: 10_000 })
-    .toBeLessThan(expected + 0.12);
+  // Pause and keep reading where the voice left off: scroll stays put.
+  const pause = page.getByRole("button", { name: /Pause|Retry/ });
+  if (await pause.isVisible()) await pause.click();
+  await page.waitForTimeout(1200);
+  const restFraction = await scrollFraction(page);
+  expect(Math.abs(restFraction - afterFraction)).toBeLessThan(0.25);
 });
 
-test("listen toggle is reachable mid-article without losing progress", async ({
+test("listen controls stay visible mid-article without losing progress", async ({
   page,
   request,
 }) => {
-  const { id, title } = await createArticle(request, "sticky-toggle");
+  const { id, title } = await createArticle(request, "sticky-controls");
   await page.goto(`/a/${id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  if (!(await page.evaluate(() => "speechSynthesis" in window))) {
-    test.skip(true, "speechSynthesis unavailable in this browser");
-    return;
-  }
+  await expect(page.locator(".article-body .w").first()).toBeVisible({ timeout: 10_000 });
 
   // Scroll mid-article and let the throttled hook persist the anchor.
   await page.evaluate(() => {
@@ -197,24 +196,20 @@ test("listen toggle is reachable mid-article without losing progress", async ({
   await expect.poll(async () => serverOffset(request, id), { timeout: 15_000 }).toBeGreaterThan(0);
   const saved = await serverOffset(request, id);
 
-  // The toggle sticks below the topbar, so it stays in the viewport
-  // mid-article — no scroll-to-top trip that would persist ~0.
-  const toggle = page.getByRole("button", { name: "🎧 Listen in sync" });
-  await expect(toggle).toBeVisible();
-  const inViewport = await toggle.evaluate((el) => {
+  // The sticky listen bar stays in the viewport mid-article — no
+  // scroll-to-top trip that would persist ~0.
+  const play = page.getByRole("button", { name: "▶ Listen" });
+  await expect(play).toBeVisible();
+  const inViewport = await play.evaluate((el) => {
     const r = el.getBoundingClientRect();
     return r.top >= 0 && r.bottom <= window.innerHeight;
   });
   expect(inViewport).toBe(true);
 
-  // Switch directly from mid-article: highlight lands on the saved word and
-  // the stored offset is not clobbered back to the top.
-  await toggle.click();
-  const active = page.locator(".listen-text .w.active");
-  await expect(active).toBeVisible({ timeout: 10_000 });
-  const wordStart = Number((await active.getAttribute("id"))?.replace("w-", ""));
-  expect(wordStart).toBeLessThanOrEqual(saved);
-  expect(saved - wordStart).toBeLessThan(500);
+  // Highlight restores near the saved offset in the same view, and the
+  // stored offset is not clobbered back to the top.
+  const active = page.locator(".article-body .w.active");
+  await expect(active.first()).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(1500);
   expect(await serverOffset(request, id)).toBeGreaterThan(saved * 0.5);
 });

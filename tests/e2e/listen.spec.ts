@@ -2,6 +2,11 @@ import { expect, test } from "@playwright/test";
 import { promises as fs } from "fs";
 import path from "path";
 
+// Unified read/listen view: one article page, no mode toggle. The sticky
+// listen bar (Play/Pause, rate, voice) sits above the rich article HTML;
+// pressing Play highlights words in place, in that same view. Clicking any
+// word seeks.
+//
 // Listen reliability Phases 1+2 (docs/listen-reliability.md §2+§4): listen
 // failures are audible (status/error UI + retry), and the happy path is
 // proven with a mocked speechSynthesis — never real audio.
@@ -192,7 +197,7 @@ test.afterEach(async ({ request }) => {
   }
 });
 
-test("Listen advances highlight, pause/resume works, position persists on reload", async ({
+test("Listen advances in-place highlight, pause/resume works, position persists on reload", async ({
   page,
   request,
 }) => {
@@ -210,23 +215,27 @@ test("Listen advances highlight, pause/resume works, position persists on reload
     )
   ).toBe(true);
 
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
+  // Unified view: the listen bar is part of the article page — no mode toggle.
+  await expect(page.getByRole("button", { name: "🎧 Listen in sync" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "📖 Read" })).toHaveCount(0);
   const status = page.getByTestId("listen-status");
   await expect(status).toContainText("Idle");
 
   // No autoplay: highlight rests at the silent-restore offset until play.
   await expect(page.getByRole("button", { name: "▶ Listen" })).toBeVisible();
+  // The rich article HTML is tokenized into clickable words on mount.
+  await expect(page.locator(".article-body .w").first()).toBeVisible({ timeout: 10_000 });
 
   await page.getByRole("button", { name: "▶ Listen" }).click();
   await expect(status).toContainText("Playing", { timeout: 10_000 });
 
-  // Word highlight advances as the mock fires scripted onboundary events.
-  const active = page.locator(".listen-text .w.active");
+  // Word highlight advances in place as the mock fires scripted onboundary events.
+  const active = page.locator(".article-body .w.active");
   await expect(active.first()).toBeVisible({ timeout: 10_000 });
-  const firstId = await active.first().getAttribute("id");
+  const firstHi = await active.first().getAttribute("data-hi");
   await expect
-    .poll(async () => active.first().getAttribute("id"), { timeout: 15_000 })
-    .not.toBe(firstId);
+    .poll(async () => active.first().getAttribute("data-hi"), { timeout: 15_000 })
+    .not.toBe(firstHi);
 
   // Pause flushes the playhead (throttled persist would otherwise lag ~2s).
   await page.getByRole("button", { name: "⏸ Pause" }).click();
@@ -243,15 +252,38 @@ test("Listen advances highlight, pause/resume works, position persists on reload
   // Reload: silent restore highlights the saved word with no autoplay.
   await page.reload();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
-  const restored = page.locator(".listen-text .w.active");
+  const restored = page.locator(".article-body .w.active");
   await expect(restored.first()).toBeVisible({ timeout: 10_000 });
-  const wordStart = Number((await restored.first().getAttribute("id"))?.replace("w-", ""));
-  expect(wordStart).toBeLessThanOrEqual(saved);
-  expect(saved - wordStart).toBeLessThan(500);
   await expect(page.getByTestId("listen-status")).toContainText("Idle");
   await expect(page.getByRole("button", { name: "▶ Listen" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pause/ })).toHaveCount(0);
+});
+
+test("Clicking a word seeks from there without leaving the article", async ({ page, request }) => {
+  const { id, title } = await createArticle(request, "clickseek");
+  await page.addInitScript(SPEECH_MOCK);
+  await page.goto(`/a/${id}`);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await expect(page.locator(".article-body .w").first()).toBeVisible({ timeout: 10_000 });
+
+  // Click a word ~3/4 through the visible article: playback starts from
+  // there in the same view (URL unchanged, no mode switch).
+  const words = page.locator(".article-body .w");
+  const count = await words.count();
+  expect(count).toBeGreaterThan(20);
+  const target = words.nth(Math.floor(count * 0.75));
+  await target.scrollIntoViewIfNeeded();
+  await target.click();
+  const status = page.getByTestId("listen-status");
+  await expect(status).toContainText("Playing", { timeout: 10_000 });
+  expect(page.url()).toContain(`/a/${id}`);
+  // The clicked region highlights (active word at/after the click).
+  await expect(page.locator(".article-body .w.active").first()).toBeVisible({ timeout: 10_000 });
+
+  // Pause keeps the place; the article stays put (no view swap).
+  await page.getByRole("button", { name: "⏸ Pause" }).click();
+  await expect(status).toContainText("Paused", { timeout: 10_000 });
+  expect(page.url()).toContain(`/a/${id}`);
 });
 
 test("Voice settings persist per browser, apply immediately, no Stop button", async ({
@@ -267,7 +299,6 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   await page.addInitScript(mockWithVoices);
   await page.goto(`/a/${id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
 
   // No separate Stop control: single Play/Pause toggle only.
   await expect(page.getByRole("button", { name: /Stop/ })).toHaveCount(0);
@@ -321,11 +352,10 @@ test("Voice settings persist per browser, apply immediately, no Stop button", as
   // the saved settings silently with no autoplay and still no Stop.
   await page.getByRole("button", { name: "⏸ Pause" }).click();
   await expect(status).toContainText("Paused", { timeout: 10_000 });
-  await expect(page.locator(".listen-text .w.active").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".article-body .w.active").first()).toBeVisible({ timeout: 10_000 });
 
   await page.reload();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
   await expect(rateSelect).toHaveValue("1.25");
   await expect(voiceSelect).toHaveValue("mock-voice-2");
   await expect(page.getByTestId("listen-status")).toContainText("Idle");
@@ -345,7 +375,6 @@ test("Speech error surfaces with retry and keeps position", async ({ page, reque
           ?.__isMock
     )
   ).toBe(true);
-  await page.getByRole("button", { name: "🎧 Listen in sync" }).click();
 
   // Force the next utterance to fail with a scripted error code.
   await page.evaluate(() => {
@@ -358,7 +387,7 @@ test("Speech error surfaces with retry and keeps position", async ({ page, reque
   await expect(status).toContainText("Error", { timeout: 10_000 });
   await expect(status).toContainText("synthesis-failed", { timeout: 10_000 });
   // Position is kept for retry: a word stays highlighted.
-  await expect(page.locator(".listen-text .w.active").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".article-body .w.active").first()).toBeVisible({ timeout: 10_000 });
 
   // Retry from the kept position resumes playback.
   await page.getByRole("button", { name: "↻ Retry" }).click();
