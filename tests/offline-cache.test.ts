@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readOfflineReady, warmOfflineCache, type WarmStorage } from "../lib/offline-cache";
+import {
+  OFFLINE_FINGERPRINT_KEY,
+  readOfflineReady,
+  warmOfflineCache,
+  type WarmStorage,
+} from "../lib/offline-cache";
 
 function memStorage(): WarmStorage {
   const map = new Map<string, string>();
@@ -107,5 +112,91 @@ describe("offline cache warming", () => {
     expect(warmed).toBe(1);
     expect(total).toBe(0);
     expect(articles).toBe(0);
+  });
+
+  it("skips the per-article fan-out when the article set is unchanged", async () => {
+    const s = memStorage();
+    const routes: Record<string, StubRes> = {
+      "/": ok,
+      "/api/articles?archived=0": okJson([{ id: "a" }, { id: "b" }]),
+      "/a/a": ok,
+      "/a/b": ok,
+    };
+    expect(await warmOfflineCache(stubFetcher(routes), s)).toEqual({
+      warmed: 3,
+      total: 2,
+      articles: 2,
+    });
+    const seen: string[] = [];
+    const fetch = async (url: string): Promise<StubRes> => {
+      seen.push(url);
+      return routes[url] ?? { ok: false, json: async () => null };
+    };
+    // Library page + list still refetched (counts/progress stay fresh), but
+    // no article document is fetched twice.
+    expect(await warmOfflineCache(fetch, s)).toEqual({ warmed: 1, total: 2, articles: 2 });
+    expect(seen).toEqual(["/", "/api/articles?archived=0"]);
+  });
+
+  it("re-warms the fan-out when the article set changes", async () => {
+    const s = memStorage();
+    await warmOfflineCache(
+      stubFetcher({ "/": ok, "/api/articles?archived=0": okJson([{ id: "a" }]), "/a/a": ok }),
+      s
+    );
+    const seen: string[] = [];
+    const fetch = async (url: string): Promise<StubRes> => {
+      seen.push(url);
+      if (url === "/") return ok;
+      if (url === "/api/articles?archived=0") return okJson([{ id: "a" }, { id: "b" }]);
+      return ok;
+    };
+    const { articles } = await warmOfflineCache(fetch, s);
+    expect(articles).toBe(2);
+    expect(seen).toContain("/a/a");
+    expect(seen).toContain("/a/b");
+  });
+
+  it("retries failed articles next pass (no fingerprint on partial warms)", async () => {
+    const s = memStorage();
+    await warmOfflineCache(
+      stubFetcher({
+        "/": ok,
+        "/api/articles?archived=0": okJson([{ id: "a" }, { id: "b" }]),
+        "/a/a": ok,
+        "/a/b": new Error("flaky"),
+      }),
+      s
+    );
+    expect(s.getItem(OFFLINE_FINGERPRINT_KEY)).toBeNull();
+    const seen: string[] = [];
+    const fetch = async (url: string): Promise<StubRes> => {
+      seen.push(url);
+      if (url === "/") return ok;
+      if (url === "/api/articles?archived=0") return okJson([{ id: "a" }, { id: "b" }]);
+      return ok;
+    };
+    expect((await warmOfflineCache(fetch, s)).articles).toBe(2);
+    expect(seen).toContain("/a/b");
+    expect(s.getItem(OFFLINE_FINGERPRINT_KEY)).not.toBeNull();
+  });
+
+  it("caps concurrent article fetches", async () => {
+    const s = memStorage();
+    const ids = ["a", "b", "c", "d", "e", "f"];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetch = async (url: string): Promise<StubRes> => {
+      if (url === "/") return ok;
+      if (url === "/api/articles?archived=0") return okJson(ids.map((id) => ({ id })));
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return ok;
+    };
+    const { articles } = await warmOfflineCache(fetch, s, { concurrency: 2 });
+    expect(articles).toBe(6);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
   });
 });

@@ -4,6 +4,11 @@
  * offline. The service worker caches these responses on the way through
  * (see public/sw.js); this module just triggers the requests and records
  * what was warmed.
+ *
+ * Two guardrails keep the warmer polite: the per-article fan-out runs in
+ * bounded chunks (never N-at-once), and repeat warms skip the fan-out
+ * entirely when the article set is unchanged (the library page itself is
+ * still refetched every time, so counts and progress stay fresh).
  */
 
 export type OfflineReady = {
@@ -18,6 +23,15 @@ export type WarmStorage = {
 };
 
 export const OFFLINE_READY_KEY = "readapaper:offline-ready";
+/**
+ * Fingerprint of the article set covered by the last *complete* warm (all
+ * article fetches settled ok). A repeat warm whose list matches skips the
+ * per-article fan-out — a partial warm persists no fingerprint, so failed
+ * articles are retried on the next pass.
+ */
+export const OFFLINE_FINGERPRINT_KEY = "readapaper:offline-fingerprint";
+/** Max parallel article fetches per warm (the fan-out is chunked). */
+export const WARM_CONCURRENCY = 4;
 /**
  * Same-tab notification fired (on `window`) after a warm persists its count.
  * `storage` events only fire in *other* tabs, so components that need to
@@ -68,15 +82,19 @@ function defaultFetcher(url: string) {
 }
 
 /**
- * Warm the offline cache: library page first, then every article document.
- * Failures are tolerated per-URL (offline mid-warm keeps what succeeded).
- * Returns { warmed, total, articles } and persists the article count for the UI.
- * (`warmed` includes the library page; the UI only reports `articles` —
- * nobody cares that a chrome page is cached.)
+ * Warm the offline cache: library page first, then every article document
+ * (bounded parallelism — see WARM_CONCURRENCY). Failures are tolerated
+ * per-URL (offline mid-warm keeps what succeeded). Returns { warmed, total,
+ * articles } and persists the article count for the UI. (`warmed` includes
+ * the library page; the UI only reports `articles` — nobody cares that a
+ * chrome page is cached.) When the article set is unchanged since the last
+ * complete warm, the per-article fan-out is skipped (the library page is
+ * still refetched, so the pass stays cheap but fresh).
  */
 export async function warmOfflineCache(
   fetcher: WarmFetcher = defaultFetcher,
-  storage: WarmStorage | null = defaultStorage()
+  storage: WarmStorage | null = defaultStorage(),
+  opts: { concurrency?: number } = {}
 ): Promise<{ warmed: number; total: number; articles: number }> {
   let total = 0;
   let warmed = 0;
@@ -101,9 +119,29 @@ export async function warmOfflineCache(
       : [];
     total = ids.length;
 
-    const results = await Promise.allSettled(ids.map((id) => fetcher(`/a/${id}`)));
-    articles = results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+    const fingerprint = ids.join("\n");
+    const ready = readOfflineReady(storage);
+    if (ready && storage?.getItem(OFFLINE_FINGERPRINT_KEY) === fingerprint) {
+      return { warmed, total, articles: ready.count };
+    }
+
+    const limit = Math.max(1, Math.floor(opts.concurrency ?? WARM_CONCURRENCY));
+    let ok = 0;
+    for (let i = 0; i < ids.length; i += limit) {
+      const chunk = ids.slice(i, i + limit);
+      const settled = await Promise.allSettled(chunk.map((id) => fetcher(`/a/${id}`)));
+      ok += settled.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+    }
+    articles = ok;
     warmed += articles;
+    // Only a complete warm moves the fingerprint — failures are retried.
+    if (articles === total) {
+      try {
+        storage?.setItem(OFFLINE_FINGERPRINT_KEY, fingerprint);
+      } catch {
+        // storage unavailable — result still returned
+      }
+    }
   } catch {
     // Fetch threw (offline mid-warm, …): keep whatever succeeded for `warmed`
     // but report the last good article count without persisting.
