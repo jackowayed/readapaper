@@ -43,11 +43,11 @@ describe("findStartSentence", () => {
   });
 
   it("treats an offset exactly at a sentence end as the next sentence", () => {
-    // Mirrors `fromOffset < s.end` in SyncedReader.
+    // Mirrors `fromOffset < s.end` in UnifiedReader.
     expect(findStartSentence(SENTENCES, 13)).toBe(1);
   });
 
-  it("wraps to 0 past the end (mirrored SyncedReader quirk)", () => {
+  it("wraps to 0 past the end (mirrored UnifiedReader quirk)", () => {
     expect(findStartSentence(SENTENCES, 31)).toBe(0);
     expect(findStartSentence(SENTENCES, 999)).toBe(0);
   });

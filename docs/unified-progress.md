@@ -2,9 +2,15 @@
 
 Status: **planned, not implemented**. Decisions below come from the 2026-09-12
 Q&A (unified position, char-offset canonical, silent restore, seamless handoff).
-This doc is the build spec: an agent should be able to execute phases 0–5 in
-order, running the gates listed in each phase, and flag the review items in §8
-instead of guessing.
+
+> Note 2026-10-03: follow-up unification shipped — read/listen are now one view
+> (`components/UnifiedReader.tsx`; `ReaderClient` mode toggle + `SyncedReader`
+> deleted). The canonical-offset progress below is unchanged; the "handoff"
+> wording is obsolete (no modes left to hand off between — first Play captures
+> live scroll instead).
+> This doc is the build spec: an agent should be able to execute phases 0–5 in
+> order, running the gates listed in each phase, and flag the review items in §8
+> instead of guessing.
 
 ## 0. Decisions (locked)
 

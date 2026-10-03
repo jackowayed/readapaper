@@ -47,7 +47,7 @@ Big extensions also appear in `DESIGN.md` §9; ops leftovers in
 - [ ] **Kindle digests (scheduled)** (S-M). Daily/weekly auto-send cron on
       top of `lib/kindle.ts`; manual batch-send exists.
 - [ ] **Speed reading (RSVP)** (S). 1-word-at-a-time mode in
-      `SyncedReader.tsx`; rate control exists.
+      `UnifiedReader.tsx` (was `SyncedReader.tsx` pre-2026-10-03 unification); rate control exists.
 - [x] ~~TTS playlist + server voices~~ (M-L) — owner: no server voices.
       Shipped Web Speech article queue instead, DONE 2026-09-24 (`f02a8b7`):
       `lib/listen-queue.ts` (localStorage order), `/listen` continuous-play

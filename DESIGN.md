@@ -15,7 +15,7 @@ v0 = single-user, local, web-only. No auth, no paid TTS, no extension. Validate 
 ```
 Browser (Next.js App Router)
   / (SaveForm + ArticleList)
-  /a/[id] (ReaderPage -> ArticleView + SyncedReader)
+  /a/[id] (ReaderPage -> UnifiedReader)
     |
     v
 Next.js API Routes (Node server)
@@ -83,7 +83,7 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 - Theme toggle: light / sepia / dark (CSS vars + localStorage). Font-size +/-.
 - Progress: `onscroll` throttled 500ms -> PUT progress; on mount restore `scrollTo(progress * scrollHeight)`.
 - Planned: unified char-offset progress (silent restore + seamless handoff) — spec in `docs/unified-progress.md`.
-- `SyncedReader` toolbar: single Play/Pause toggle (no Stop — pause keeps position, Resume continues; click first word to restart), rate (0.75–2x) + voice select persisted per-browser in localStorage (offline-safe, apply immediately mid-play via restart from playhead), sentence+word highlight toggle, auto-scroll toggle.
+- Unified reader (`UnifiedReader`, shipped 2026-10-03): one view, no read/listen toggle — the sanitized HTML always renders with per-word spans, the sticky listen bar plays/highlights in place, click any word to seek. First Play captures live scroll so reading into listening keeps position.
 
 ## 7. Synced TTS design
 
@@ -91,15 +91,15 @@ Edge cases: JS-rendered sites fail (documented limitation); images hotlinked (no
 
 - `utterance.onboundary` gives `{charIndex, charLength, name:'word'}` in Chrome/Edge/Safari (Firefox: sentence-only — degrade to sentence highlight).
 - Pre-tokenize `article.text` into sentences -> speak as a queue of utterances (enables click-to-seek per sentence + avoids 15k-char Chrome cutoff). Track `globalCharOffset` per utterance.
-- Highlight: map `charIndex` -> word `<span>`. Render text layer as word spans (separate from HTML display? v0 highlights the plain-text view; HTML view dims to sentence). Simpler robust approach: **sync overlay** — display `text` tokenized view for listening mode, keep rich HTML for reading mode, toggle preserves scroll anchor.
+- Highlight: map `charIndex` -> word `<span>`. The unified reader wraps every visible HTML word in a span (`lib/html-tokenize.ts`) and aligns canonical `text` offsets onto them (`lib/html-sync.ts`: case/punctuation folding, lookahead for inserted captions) — TTS speaks `article.text`, the highlight lands in the rich HTML in place. Simpler robust approach kept as fallback: unmapped clicks seek via fractional estimate.
 - Auto-scroll: `activeSpan.scrollIntoView({block:'center'})`, paused 3s after manual scroll.
-- Click word -> cancel queue, restart from that sentence/word offset.
+- Click word -> cancel queue, restart from that sentence/word offset. Links navigate while paused, seek while playing.
 
 Limitations accepted in v0: voice quality varies, no background iOS play, no exact seek within sentence, no offline audio file.
 
 ### Prod upgrade path (not in v0, see §9):
 
-Pre-generate MP3 + word timestamps (Polly `SpeechMarks` / Google `timepoints`), serve playlist, drive highlight off `audio.currentTime` via binary search + rAF. Same `SyncedReader` interface, different driver (`SpeechDriver` abstraction).
+Pre-generate MP3 + word timestamps (Polly `SpeechMarks` / Google `timepoints`), serve playlist, drive highlight off `audio.currentTime` via binary search + rAF. Same `UnifiedReader` interface, different driver (`SpeechDriver` abstraction).
 
 ## 8. File layout (v0)
 
@@ -118,7 +118,7 @@ lib/
   text.ts                  # sentence/word tokenize, chunking
 components/
   SaveForm.tsx, ArticleList.tsx, ArticleView.tsx
-  SyncedReader.tsx         # speech driver + highlight + controls
+  UnifiedReader.tsx        # single read+listen view: speech driver + in-place highlight + controls
   ThemeControl.tsx
 data/articles.json         # created at runtime
 ```
@@ -131,7 +131,7 @@ data/articles.json         # created at runtime
 - [ ] **Multi-user + auth:** NextAuth/OAuth, per-user articles, Postgres + Drizzle/Prisma migration.
 - [~] **Offline PWA:** service worker, IndexedDB cache, background audio + Media Session API, lock-screen controls.
   - [x] DONE 2026-09-11 (`ecfb3d5`): installable shell + offline reads — `public/manifest.webmanifest` (+ SVG icons), vanilla `public/sw.js` (cache-first static assets, network-first API/navigations, `/offline` fallback), `app/offline/page.tsx`, `components/OfflineSupport.tsx` (SW registration, online/offline banner, queue flush on reconnect), manifest/icons/theme-color in `app/layout.tsx`; e2e `tests/e2e/offline.spec.ts` (manifest/SW/offline page + cached-article-stays-readable).
-  - [x] DONE 2026-09-11 (`48da2f1`, `0276bcf`): offline progress sync + lock-screen controls — `lib/offline-queue.ts` (localStorage queue, replay on reconnect) wired into `useReadingProgress`, `lib/media-session.ts` (play/pause/stop) wired into `SyncedReader`, offline guard in `SaveForm`.
+  - [x] DONE 2026-09-11 (`48da2f1`, `0276bcf`): offline progress sync + lock-screen controls — `lib/offline-queue.ts` (localStorage queue, replay on reconnect) wired into `useReadingProgress`, `lib/media-session.ts` (play/pause/stop) wired into the reader, offline guard in `SaveForm`.
   - [x] DONE 2026-09-11 (`74562cb`): proactive warming for unopened articles — `lib/offline-cache.ts` (fetches `/` + every `/a/[id]` through the SW) + `components/OfflineCacheButton.tsx` on the library page (auto-warms while online, shows cached-page count, manual refresh); ready count in the `OfflineSupport` banner; SW precache bumped to `readapaper-v2` (`/` + `/offline`).
   - [x] DONE 2026-09-11 (`9d61ba2`): SW prefetches each navigation's `/_next/static/` CSS/JS (via `event.waitUntil`, best-effort) so warmed-but-never-rendered pages keep styles offline; e2e warming test asserts Georgia body font offline.
   - [x] DONE 2026-09-11 (`bbcc071`): asset prefetch for all same-origin HTML fetches (not just navigations — covers the warmer's `/`), `?v=`-stripped cache keys for `/_next/static/` so dev restarts don't orphan cached CSS.
@@ -172,6 +172,7 @@ data/articles.json         # created at runtime
 - [x] 2026-10-02 (`9f2bc1c`): prod-only service worker — register/unregister gated by env (`lib/sw-register.ts` + `tests/sw-register.test.ts`), dev pre-hydration unregister in `app/layout.tsx`, offline warm button hidden in dev. Fixes recurring dev soft-refresh `reading 'call'` crash from a production worker controlling `next dev` on the same origin (localhost:3000).
 - [x] 2026-10-03 (`68b9bda`): dev passthrough SW stub via `middleware.ts` (`lib/sw-dev-stub.ts` + tripwire tests) — replaces the env-gating helper + inline script (net −61 lines); client registration back to one unconditional line, correct in every env.
 - [x] 2026-10-03 (`a31e3a6`): bounded + debounced cache warming — per-article fan-out chunked at `WARM_CONCURRENCY` (4), fingerprint skip when the article set is unchanged, partial warms retry (closes BACKLOG warmer fan-out suspect).
+- [x] 2026-10-03 (`2bccff0`, `585ac05`, `2c45440`): unified read+listen view — no mode toggle; `components/UnifiedReader.tsx` renders sanitized HTML with per-word spans (`lib/html-tokenize.ts`) and highlights TTS in place via `lib/html-sync.ts` offset alignment; first Play captures live scroll, scroll writes pause while playing, links navigate while paused / seek while playing; `/listen` queue renders the same view; `components/SyncedReader.tsx` + `components/ReaderClient.tsx` deleted — `app/a/[id]/page.tsx`, `components/ListenQueuePlayer.tsx`, `app/globals.css` (`.listen-bar` sticky, `.article-body .w` highlight), `tests/e2e/listen.spec.ts`, `tests/e2e/progress-sync.spec.ts`, `tests/html-sync.test.ts`, `tests/tokenize.test.ts`.
 
 ## 11. Risks
 

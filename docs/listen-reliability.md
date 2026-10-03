@@ -2,6 +2,10 @@
 
 Status: **planned, not implemented**.
 
+> Note 2026-10-03: the read/listen views were unified — `components/SyncedReader.tsx`
+> below is now `components/UnifiedReader.tsx` (same speech driver, in-place highlight).
+> Read file names below with that rename applied.
+
 ## 0. Incident report
 
 User clicked Listen in sync in Chrome and nothing happened. Post-mortem answer:

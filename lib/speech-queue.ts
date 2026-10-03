@@ -1,14 +1,14 @@
 /**
- * speech-queue — pure TTS queue logic extracted from SyncedReader.
+ * speech-queue — pure TTS queue logic extracted from UnifiedReader.
  *
  * Mirrors `speakSentenceRange` / `onPlayPause` queue semantics in
- * `components/SyncedReader.tsx` (read-only reference, do not drift):
+ * `components/UnifiedReader.tsx` (read-only reference, do not drift):
  * - queue of per-sentence utterances, start sentence selected by offset
  * - mid-sentence seeks slice the first utterance, later ones speak whole
  * - whitespace-only sentences are skipped, `onend` advances to next
  * - every `start()` issues `cancel()` synchronously before `speak()`
  * - cancel-driven errors ("interrupted"/"canceled") are benign and ignored;
- *   SyncedReader additionally guards stale utterances by generation
+ *   UnifiedReader additionally guards stale utterances by generation
  *
  * Zero DOM / Web Speech dependencies: the synth is injected via the
  * `QueueSynth` interface so tests run under node with a recording mock.
@@ -48,7 +48,7 @@ export interface QueueEvents {
 
 /**
  * Sentence selection: first sentence with `fromOffset < s.end`.
- * Mirrors SyncedReader (`findIndex((s) => fromOffset < s.end)`, `-1` -> 0),
+ * Mirrors UnifiedReader (`findIndex((s) => fromOffset < s.end)`, `-1` -> 0),
  * including its wrap-to-0 quirk for offsets past the end.
  */
 export function findStartSentence(sentences: SentenceSpan[], fromOffset: number): number {
@@ -100,7 +100,7 @@ export function advanceUtterance(sentences: SentenceSpan[], idx: number): Uttera
 
 /**
  * Map an `onboundary` charIndex (relative to the utterance) to a global
- * offset + sentence index. Mirrors the SyncedReader onboundary handler.
+ * offset + sentence index. Mirrors the UnifiedReader onboundary handler.
  * `sentenceIndex` is -1 when the offset falls outside all sentences.
  */
 export function resolveBoundary(
@@ -142,7 +142,7 @@ export function isCanceledSpeechError(error: unknown): boolean {
 }
 
 /**
- * Pure play/pause toggle decision for `SyncedReader.onPlayPause`.
+ * Pure play/pause toggle decision for `UnifiedReader.onPlayPause`.
  *
  * The previous implementation derived the UI state by reading
  * `synth.paused` immediately after calling `synth.pause()`/`resume()`.

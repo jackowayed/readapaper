@@ -26,7 +26,7 @@ import { useReadingProgress } from "./ThemeControl";
  * listen bar (Play/Pause, rate, voice, auto-scroll, status) lives above it.
  * Pressing Play (or clicking any word) speaks `article.text` via the Web
  * Speech queue driver (same per-sentence queue semantics as the old
- * SyncedReader) and highlights the spoken words in place, in this same view.
+ * split-view reader) and highlights the spoken words in place, in this same view.
  * Pausing keeps the position — scroll on to keep reading. No handoff, no
  * remount, no lost scroll.
  *
