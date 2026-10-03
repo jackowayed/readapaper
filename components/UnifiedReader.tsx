@@ -14,6 +14,16 @@ import {
 import { tokenizeArticleHtml } from "@/lib/html-tokenize";
 import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
 import { nextPlayPauseAction, isCanceledSpeechError } from "@/lib/speech-queue";
+import {
+  audioCacheKey,
+  estimateGlobalOffset,
+  planAudioFromOffset,
+  planAudioNext,
+  type AudioSentencePlan,
+} from "@/lib/audio-queue";
+import { ensureMespeakLoaded, synthesizeWavArray } from "@/lib/mespeak-tts";
+import { loadTtsEngine, rateToWpm, saveTtsEngine, type TtsEngine } from "@/lib/tts-engine";
+import { wavArrayToBlob } from "@/lib/wav";
 import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
 import { persistProgressOffset } from "@/lib/offline-queue";
 import { useReadingProgress } from "./ThemeControl";
@@ -23,12 +33,20 @@ import { useReadingProgress } from "./ThemeControl";
  *
  * There is no read/listen mode toggle: the sanitized article HTML is always
  * rendered, with every visible word wrapped in a clickable span. The sticky
- * listen bar (Play/Pause, rate, voice, auto-scroll, status) lives above it.
- * Pressing Play (or clicking any word) speaks `article.text` via the Web
- * Speech queue driver (same per-sentence queue semantics as the old
- * split-view reader) and highlights the spoken words in place, in this same view.
- * Pausing keeps the position — scroll on to keep reading. No handoff, no
- * remount, no lost scroll.
+ * listen bar (Play/Pause, engine, rate, voice, auto-scroll, status) lives
+ * above it. Pressing Play (or clicking any word) speaks `article.text` and
+ * highlights the spoken words in place, in this same view. Pausing keeps the
+ * position — scroll on to keep reading. No handoff, no remount, no lost scroll.
+ *
+ * Two speech engines share the queue semantics (per-sentence slices from a
+ * canonical offset, same progress persistence):
+ * - "system" (default): OS/browser voices via `speechSynthesis`, word-exact
+ *   highlight from `onboundary`. Suspended by iOS when locked/backgrounded.
+ * - "offline": built-in eSpeak voice (mespeak, bundled JS, synthesized to
+ *   WAV per sentence) played through a single `<audio>` element — the only
+ *   client-side playback path iOS keeps alive on lock / in background.
+ *   Highlight is time-interpolated (sentence-level, like the Firefox
+ *   fallback: no word timestamps from eSpeak v1).
  *
  * Speech still consumes canonical `article.text` (progress offsets index into
  * it); `lib/html-sync` aligns those offsets onto the visible HTML words for
@@ -87,15 +105,28 @@ export default function UnifiedReader({
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceURI, setVoiceURI] = useState<string>(() => loadVoiceSettings().voiceURI);
   const [rate, setRate] = useState<number>(() => loadVoiceSettings().rate);
+  const [engine, setEngine] = useState<TtsEngine>(() => loadTtsEngine());
   const [playing, setPlaying] = useState(false);
   const [status, setStatus] = useState<"idle" | "playing" | "paused" | "error">("idle");
   const [speakError, setSpeakError] = useState<string | null>(null);
+  const [offlinePhase, setOfflinePhase] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [offlineError, setOfflineError] = useState<string | null>(null);
   const statusRef = useRef<"idle" | "playing" | "paused" | "error">("idle");
   statusRef.current = status;
+  const engineRef = useRef<TtsEngine>(engine);
+  engineRef.current = engine;
   const [autoScroll, setAutoScroll] = useState(true);
 
   const queueRef = useRef<{ idx: number; speaking: boolean }>({ idx: 0, speaking: false });
   const speakGenRef = useRef(0);
+  // Offline (<audio>) engine: generation guards in-flight syntheses the way
+  // speakGenRef guards stale utterances; the plan + duration drive highlight.
+  const offlineGenRef = useRef(0);
+  const offlinePlanRef = useRef<AudioSentencePlan | null>(null);
+  const offlineDurRef = useRef(1);
+  const offlineSpeakingRef = useRef(false);
+  const offlineCacheRef = useRef(new Map<string, { url: string; durationSec: number }>());
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const optsRef = useRef({ voiceURI, rate });
   optsRef.current = { voiceURI, rate };
   const pauseUntilRef = useRef(0);
@@ -323,6 +354,310 @@ export default function UnifiedReader({
     [sentences, supported, voices, applyHighlight, flushPosition]
   );
 
+  // --- Offline (<audio>) engine -------------------------------------------
+  // Same queue semantics as the system path (per-sentence slices from a
+  // canonical offset), but each sentence is synthesized to WAV (mespeak,
+  // bundled eSpeak — no network TTS) and played through one `<audio>`
+  // element, which iOS keeps alive on lock / in background. Highlight is
+  // time-interpolated off `currentTime` (no onboundary from eSpeak v1).
+
+  /** Silence the system queue without touching offline state. */
+  const stopSystemQueue = useCallback(() => {
+    queueRef.current.speaking = false;
+    if (!supported) return;
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore — synth already gone (SSR/test teardown)
+    }
+  }, [supported]);
+
+  /** Halt offline playback. `speaking=false` first so the element's own
+   * error/ended events from the src teardown are ignored. */
+  function stopOfflineAudio(clearSrc: boolean) {
+    offlineGenRef.current += 1;
+    offlineSpeakingRef.current = false;
+    offlinePlanRef.current = null;
+    const el = audioRef.current;
+    if (!el) return;
+    try {
+      el.pause();
+    } catch {
+      // ignore
+    }
+    if (clearSrc) {
+      el.removeAttribute("src");
+      el.load();
+    }
+  }
+
+  /** Synthesize (or reuse from the LRU-capped session cache) one slice. */
+  const synthesizeCached = useCallback(
+    (utterText: string, wpm: number): Promise<{ url: string; durationSec: number }> => {
+      const key = audioCacheKey(utterText, wpm);
+      const hit = offlineCacheRef.current.get(key);
+      if (hit) return Promise.resolve(hit);
+      return ensureMespeakLoaded().then((engine) => {
+        const res = synthesizeWavArray(engine, utterText, wpm);
+        if (!res) throw new Error("synthesis failed");
+        const url = URL.createObjectURL(wavArrayToBlob(res.wav));
+        const entry = { url, durationSec: res.durationSec };
+        const cache = offlineCacheRef.current;
+        if (cache.size >= 60) {
+          const oldest = cache.keys().next();
+          if (!oldest.done) {
+            const evicted = cache.get(oldest.value);
+            if (evicted) {
+              try {
+                URL.revokeObjectURL(evicted.url);
+              } catch {
+                // ignore
+              }
+            }
+            cache.delete(oldest.value);
+          }
+        }
+        cache.set(key, entry);
+        return entry;
+      });
+    },
+    []
+  );
+
+  const failOffline = useCallback(
+    (message: string) => {
+      offlineSpeakingRef.current = false;
+      setPlaying(false);
+      setStatus("error");
+      setOfflinePhase("error");
+      setOfflineError(message);
+      flushPosition();
+    },
+    [flushPosition]
+  );
+
+  /** Start (or restart after error/drain) offline playback from an offset. */
+  const speakOfflineRange = useCallback(
+    (fromOffset: number) => {
+      stopSystemQueue();
+      offlineGenRef.current += 1;
+      const gen = offlineGenRef.current;
+      const wpm = rateToWpm(optsRef.current.rate);
+      const plan = planAudioFromOffset(sentences, fromOffset);
+      offlineSpeakingRef.current = true;
+      offlinePlanRef.current = plan;
+      setPlaying(true);
+      setStatus("playing");
+      setSpeakError(null);
+      setOfflineError(null);
+      setOfflinePhase("loading");
+      if (!plan) {
+        offlineSpeakingRef.current = false;
+        offlinePlanRef.current = null;
+        setPlaying(false);
+        setStatus("idle");
+        setOfflinePhase("idle");
+        if (aliveRef.current) onEndedRef.current?.();
+        return;
+      }
+      applyHighlight(plan.utterStart, plan.sentenceIndex);
+      void synthesizeCached(plan.utterText, wpm).then(
+        (entry) => {
+          if (gen !== offlineGenRef.current || !aliveRef.current) return;
+          const el = audioRef.current;
+          if (!el) {
+            failOffline("Audio element unavailable — Retry to continue.");
+            return;
+          }
+          offlineDurRef.current = entry.durationSec;
+          setOfflinePhase("ready");
+          el.src = entry.url;
+          el.playbackRate = optsRef.current.rate;
+          void el
+            .play()
+            .then(() => {
+              if (gen !== offlineGenRef.current) return;
+              // Prefetch the next sentence while this one plays.
+              const next = planAudioNext(sentences, plan.sentenceIndex);
+              if (next) void synthesizeCached(next.utterText, wpm).catch(() => {});
+            })
+            .catch(() => {
+              if (gen !== offlineGenRef.current) return;
+              failOffline("Audio playback was blocked — tap Retry.");
+            });
+        },
+        () => {
+          if (gen !== offlineGenRef.current) return;
+          failOffline("Offline voice failed to load — check connection, then Retry.");
+        }
+      );
+    },
+    [sentences, applyHighlight, stopSystemQueue, synthesizeCached, failOffline]
+  );
+
+  /** `<audio ended>` — advance to the next sentence or drain the queue. */
+  function handleAudioEnded() {
+    if (engineRef.current !== "offline" || !offlineSpeakingRef.current) return;
+    const gen = offlineGenRef.current;
+    const plan = offlinePlanRef.current;
+    if (!plan) return;
+    const wpm = rateToWpm(optsRef.current.rate);
+    const next = planAudioNext(sentences, plan.sentenceIndex);
+    if (!next) {
+      offlineSpeakingRef.current = false;
+      offlinePlanRef.current = null;
+      setPlaying(false);
+      setStatus("idle");
+      if (aliveRef.current) onEndedRef.current?.();
+      return;
+    }
+    offlinePlanRef.current = next;
+    applyHighlight(next.utterStart, next.sentenceIndex);
+    void synthesizeCached(next.utterText, wpm).then(
+      (entry) => {
+        if (gen !== offlineGenRef.current || !aliveRef.current) return;
+        const el = audioRef.current;
+        if (!el) {
+          failOffline("Audio element unavailable — Retry to continue.");
+          return;
+        }
+        offlineDurRef.current = entry.durationSec;
+        el.src = entry.url;
+        el.playbackRate = optsRef.current.rate;
+        void el
+          .play()
+          .then(() => {
+            if (gen !== offlineGenRef.current) return;
+            const following = planAudioNext(sentences, next.sentenceIndex);
+            if (following) void synthesizeCached(following.utterText, wpm).catch(() => {});
+          })
+          .catch(() => {
+            if (gen !== offlineGenRef.current) return;
+            failOffline("Audio playback was blocked — tap Retry.");
+          });
+      },
+      () => {
+        if (gen !== offlineGenRef.current) return;
+        failOffline("Offline voice failed — Retry resumes from here.");
+      }
+    );
+  }
+
+  /** `<audio timeupdate>` (~4Hz) — interpolate the playhead in the slice. */
+  function handleAudioTimeUpdate(e: React.SyntheticEvent<HTMLAudioElement>) {
+    if (engineRef.current !== "offline" || !offlineSpeakingRef.current) return;
+    const plan = offlinePlanRef.current;
+    if (!plan) return;
+    const el = e.currentTarget;
+    const dur =
+      Number.isFinite(el.duration) && el.duration > 0 ? el.duration : offlineDurRef.current;
+    const off = estimateGlobalOffset(plan, el.currentTime, dur);
+    const sIdx = sentences.findIndex((x) => off >= x.start && off < x.end);
+    applyHighlight(off, sIdx === -1 ? plan.sentenceIndex : sIdx);
+  }
+
+  function handleAudioError() {
+    // Teardown (seek/switch/pause) clears speaking first, so stray element
+    // errors from src removal never surface.
+    if (engineRef.current !== "offline" || !offlineSpeakingRef.current) return;
+    // An empty-src element reports an error on load() — not a real failure.
+    const src = audioRef.current?.currentSrc;
+    if (!src) return;
+    failOffline("Audio playback failed — Retry resumes from here.");
+  }
+
+  function pauseOfflineAudio() {
+    if (!offlineSpeakingRef.current || statusRef.current !== "playing") return;
+    // Bump the generation: a synthesis still in flight must not start the
+    // element after the user paused.
+    offlineGenRef.current += 1;
+    try {
+      audioRef.current?.pause();
+    } catch {
+      // ignore
+    }
+    setPlaying(false);
+    setStatus("paused");
+    flushPosition();
+  }
+
+  function resumeOfflineAudio() {
+    const el = audioRef.current;
+    if (!offlineSpeakingRef.current || !el || !el.currentSrc) {
+      // Paused mid-synthesis, or src cleared: (re)start from the playhead.
+      hasPlayedRef.current = true;
+      speakOfflineRange(activeOffsetRef.current ?? 0);
+      return;
+    }
+    el.playbackRate = optsRef.current.rate;
+    void el
+      .play()
+      .then(() => {
+        setPlaying(true);
+        setStatus("playing");
+      })
+      .catch(() => {
+        failOffline("Audio playback was blocked — tap Retry.");
+      });
+  }
+
+  function onPlayPauseOffline() {
+    if (offlineSpeakingRef.current && playing) {
+      pauseOfflineAudio();
+      return;
+    }
+    if (offlineSpeakingRef.current && statusRef.current === "paused") {
+      resumeOfflineAudio();
+      return;
+    }
+    let start = activeOffsetRef.current ?? 0;
+    if (!hasPlayedRef.current) {
+      try {
+        const h = document.documentElement.scrollHeight - window.innerHeight;
+        if (h > 0) {
+          const p = Math.min(1, Math.max(0, window.scrollY / h));
+          start = fractionToOffset(p, textLength);
+        }
+      } catch {
+        // DOM read failed (SSR/test) — fall back to the kept playhead.
+      }
+    }
+    hasPlayedRef.current = true;
+    speakOfflineRange(start);
+  }
+
+  function handleEngineChange(next: TtsEngine) {
+    stopSystemQueue();
+    stopOfflineAudio(true);
+    setPlaying(false);
+    setStatus("idle");
+    setSpeakError(null);
+    setOfflineError(null);
+    if (next === "system") setOfflinePhase("idle");
+    setEngine(next);
+    engineRef.current = next;
+    saveTtsEngine(next);
+    flushPosition();
+  }
+
+  // Revoke synthesized blob URLs on unmount (the 60-entry session cache is
+  // otherwise kept across engine switches for instant switch-back).
+  useEffect(
+    () => () => {
+      offlineGenRef.current += 1;
+      const cache = offlineCacheRef.current;
+      for (const entry of cache.values()) {
+        try {
+          URL.revokeObjectURL(entry.url);
+        } catch {
+          // ignore
+        }
+      }
+      cache.clear();
+    },
+    []
+  );
+
   // First Play in a view starts from where you're reading: capture the live
   // scroll position (the playhead ref only knows the last *listen* offset,
   // which is 0 on a fresh read-to-listen switch). Later starts (retry after
@@ -330,6 +665,10 @@ export default function UnifiedReader({
   const hasPlayedRef = useRef(false);
 
   function onPlayPause() {
+    if (engineRef.current === "offline") {
+      onPlayPauseOffline();
+      return;
+    }
     if (!supported) return;
     const synth = window.speechSynthesis;
     const action = nextPlayPauseAction({
@@ -375,15 +714,21 @@ export default function UnifiedReader({
       // they seek (never yank the page away mid-listen).
       const inLink =
         e?.target instanceof Element ? (e.target as Element).closest("a") != null : false;
-      const activelyPlaying = queueRef.current.speaking && statusRef.current === "playing";
+      const activelyPlaying =
+        (queueRef.current.speaking || offlineSpeakingRef.current) &&
+        statusRef.current === "playing";
       if (inLink && !activelyPlaying) return;
       if (inLink) e?.preventDefault();
       let off = model ? htmlIndexToTextOffset(hi, model.textWords, model.alignment) : null;
       if (off == null) off = estimateTextOffsetForHtmlIndex(hi, model?.htmlCount ?? 0, textLength);
       hasPlayedRef.current = true;
+      if (engineRef.current === "offline") {
+        speakOfflineRange(off);
+        return;
+      }
       speakSentenceRange(off);
     },
-    [speakSentenceRange, textLength]
+    [speakSentenceRange, speakOfflineRange, textLength]
   );
   const seekRef = useRef(seekFromHtml);
   seekRef.current = seekFromHtml;
@@ -393,6 +738,16 @@ export default function UnifiedReader({
     const voice = optsRef.current.voiceURI;
     optsRef.current = { voiceURI: voice, rate: next };
     saveVoiceSettings({ rate: next, voiceURI: voice });
+    if (engineRef.current === "offline") {
+      // No re-synthesis: the current sentence keeps its audio at the new
+      // tempo via playbackRate, later sentences synthesize at the new wpm.
+      try {
+        if (audioRef.current) audioRef.current.playbackRate = next;
+      } catch {
+        // ignore
+      }
+      return;
+    }
     if (queueRef.current.speaking && statusRef.current === "playing") {
       speakSentenceRange(activeOffsetRef.current ?? 0, { rate: next, voiceURI: voice });
     }
@@ -403,12 +758,18 @@ export default function UnifiedReader({
     const r = optsRef.current.rate;
     optsRef.current = { voiceURI: nextURI, rate: r };
     saveVoiceSettings({ rate: r, voiceURI: nextURI });
-    if (queueRef.current.speaking && statusRef.current === "playing") {
-      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, voiceURI: nextURI });
+    if (engineRef.current !== "offline") {
+      if (queueRef.current.speaking && statusRef.current === "playing") {
+        speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, voiceURI: nextURI });
+      }
     }
   }
 
   function pausePlayback() {
+    if (engineRef.current === "offline") {
+      pauseOfflineAudio();
+      return;
+    }
     if (!supported) return;
     if (!queueRef.current.speaking || statusRef.current !== "playing") return;
     window.speechSynthesis.pause();
@@ -471,10 +832,14 @@ export default function UnifiedReader({
   }, [tokenized]);
 
   const hasSpeech = sentences.length > 0;
+  // The offline engine needs no speechSynthesis, so it stays available where
+  // system TTS is missing.
+  const ttsAvailable = supported || engine === "offline";
+  const statusDetail = speakError ?? offlineError;
 
   return (
     <div>
-      {supported && hasSpeech ? (
+      {ttsAvailable && hasSpeech ? (
         <section aria-label="Listen in sync" className="listen-bar">
           <div className="controls">
             <button className="primary" onClick={onPlayPause}>
@@ -486,6 +851,17 @@ export default function UnifiedReader({
                     ? "▶ Resume"
                     : "▶ Listen"}
             </button>
+            <label>
+              Voice engine{" "}
+              <select
+                value={engine}
+                onChange={(e) => handleEngineChange(e.target.value as TtsEngine)}
+                aria-label="TTS engine"
+              >
+                <option value="system">System voice</option>
+                <option value="offline">Offline — plays locked</option>
+              </select>
+            </label>
             <label>
               Rate{" "}
               <select
@@ -500,13 +876,18 @@ export default function UnifiedReader({
                 ))}
               </select>
             </label>
-            <label>
+            <label
+              title={
+                engine === "offline" ? "Offline voice uses the built-in English voice" : undefined
+              }
+            >
               Voice{" "}
               <select
                 value={voiceURI}
                 onChange={(e) => handleVoiceChange(e.target.value)}
                 aria-label="Voice"
                 style={{ maxWidth: 220 }}
+                disabled={engine === "offline"}
               >
                 <option value="">Default</option>
                 {voices.map((v) => (
@@ -527,14 +908,34 @@ export default function UnifiedReader({
             <span role="status" aria-live="polite" data-testid="listen-status" className="muted">
               Status:{" "}
               {status === "playing"
-                ? "Playing"
+                ? engine === "offline" && offlinePhase === "loading"
+                  ? "Loading offline voice…"
+                  : "Playing"
                 : status === "paused"
                   ? "Paused"
                   : status === "error"
-                    ? `Error${speakError ? ` — ${speakError}` : ""}`
+                    ? `Error${statusDetail ? ` — ${statusDetail}` : ""}`
                     : "Idle"}
             </span>
+            {engine === "offline" && (
+              <span className="muted" data-testid="offline-voice-note">
+                Offline voice: robotic English, keeps playing with the screen locked or in
+                background.
+              </span>
+            )}
           </div>
+          {/* Single background-capable player for the offline engine. Hidden:
+          highlight + status carry the UX; the element must stay mounted so
+          iOS keeps the audio session alive across sentences. */}
+          <audio
+            ref={audioRef}
+            preload="auto"
+            data-testid="offline-audio"
+            style={{ display: "none" }}
+            onEnded={handleAudioEnded}
+            onTimeUpdate={handleAudioTimeUpdate}
+            onError={handleAudioError}
+          />
         </section>
       ) : (
         <p className="muted">
@@ -562,7 +963,8 @@ export default function UnifiedReader({
       )}
       <p className="muted">
         Tip: click any word to listen from there — the highlight follows right here. Pause to keep
-        reading; links work while paused.
+        reading; links work while paused. Switch to the Offline engine to keep listening with the
+        screen locked or in another app.
       </p>
     </div>
   );

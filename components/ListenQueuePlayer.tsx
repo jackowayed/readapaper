@@ -23,8 +23,9 @@ type QueueItem = {
  *   through the shared offline-safe sender.
  * - `onEnded` advances to the next id and auto-plays it: a flag + effect
  *   clicks the freshly mounted player's Listen button, so playback continues
- *   without another tap (`speechSynthesis.speak` is allowed outside gestures
- *   on desktop Chrome and after the initial Play tap on iOS).
+ *   without another tap (system `speechSynthesis.speak` is allowed outside
+ *   gestures on desktop Chrome and after the initial Play tap on iOS; the
+ *   offline `<audio>` engine relies on the origin's sticky media engagement).
  * - Playback is keyed off the current *id* (not the head index), so a
  *   front-insert (`enqueueNext`) mid-play never disturbs the spoken item.
  */
