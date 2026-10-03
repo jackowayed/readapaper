@@ -53,10 +53,11 @@ export default function ThemeControl() {
 //
 // Offset mode (unified progress): pass `textLength` + `onPosition` and the
 // hook converts the scroll fraction to a canonical char offset, handing it to
-// the owner via `onPosition` — the owner (ReaderClient) persists through the
+// the owner via `onPosition` — the owner (UnifiedReader) persists through the
 // shared offline-safe sender, so read + listen share one write path. Without
 // `onPosition` the hook keeps its legacy behavior (persists `{ progress }`
-// itself). `enabled` gates the scroll listener so only read mode persists.
+// itself). `enabled` gates the scroll listener so scroll writes pause while
+// the playhead owns the position.
 export type ReadingProgressOptions = {
   textLength?: number;
   enabled?: boolean;

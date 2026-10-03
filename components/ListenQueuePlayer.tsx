@@ -1,35 +1,26 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import SyncedReader from "./SyncedReader";
-import { persistProgressOffset } from "@/lib/offline-queue";
+import UnifiedReader from "./UnifiedReader";
 import { clear, move, QUEUE_CHANGE_EVENT, readQueue, remove } from "@/lib/listen-queue";
 
 type QueueItem = {
   id: string;
   title: string;
   text: string;
+  html: string;
   progressOffset: number;
   missing?: boolean;
 };
-
-/** Shared offline-safe sender for queue progress: PUT `{ offset }`. */
-function sendOffset(id: string, offset: number) {
-  return fetch(`/api/articles/${id}/progress`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ offset }),
-  });
-}
 
 /**
  * ListenQueuePlayer — continuous TTS over the client-side listen queue.
  *
  * - Loads article ids from `lib/listen-queue` (localStorage) and fetches each
- *   `GET /api/articles/[id]` JSON (title/text/progressOffset) as needed.
- * - Renders the existing `SyncedReader` for the current item (`key` remount
- *   per id so `startOffset` restores that item's saved offset), persisting
- *   the playhead through the shared offline-safe sender.
+ *   `GET /api/articles/[id]` JSON (title/html/text/progressOffset) as needed.
+ * - Renders the unified reader for the current item (`key` remount per id so
+ *   the saved offset restores); the reader persists the playhead itself
+ *   through the shared offline-safe sender.
  * - `onEnded` advances to the next id and auto-plays it: a flag + effect
  *   clicks the freshly mounted player's Listen button, so playback continues
  *   without another tap (`speechSynthesis.speak` is allowed outside gestures
@@ -44,7 +35,7 @@ export default function ListenQueuePlayer() {
   const [failedIds, setFailedIds] = useState<string[]>([]);
   const playerRef = useRef<HTMLDivElement>(null);
   // Set when the current id changed via natural drain: the effect below
-  // clicks Play on the newly mounted SyncedReader (autoplay-after-advance).
+  // clicks Play on the newly mounted reader (autoplay-after-advance).
   // Manual selection leaves this false (user taps Play themselves).
   const autoPlayRef = useRef(false);
   const fetchingRef = useRef(new Set<string>());
@@ -85,6 +76,7 @@ export default function ListenQueuePlayer() {
       const body = (await res.json()) as {
         title?: string;
         text?: string;
+        html?: string;
         progressOffset?: number;
       };
       if (typeof body.text !== "string" || !body.text) {
@@ -97,6 +89,7 @@ export default function ListenQueuePlayer() {
           id,
           title: typeof body.title === "string" && body.title ? body.title : "Untitled",
           text: body.text as string,
+          html: typeof body.html === "string" ? body.html : "",
           progressOffset:
             typeof body.progressOffset === "number" && Number.isFinite(body.progressOffset)
               ? body.progressOffset
@@ -120,14 +113,6 @@ export default function ListenQueuePlayer() {
 
   const current = currentId ? items[currentId] : undefined;
 
-  const handlePosition = useCallback(
-    (next: number) => {
-      if (!current) return;
-      persistProgressOffset(current.id, next, current.text.length, sendOffset).catch(() => {});
-    },
-    [current]
-  );
-
   const advanceFrom = useCallback(
     (finishedId: string) => {
       const order = readQueue();
@@ -148,10 +133,10 @@ export default function ListenQueuePlayer() {
     if (currentId) advanceFrom(currentId);
   }, [currentId, advanceFrom]);
 
-  // Autoplay-after-advance: click Play on the freshly mounted SyncedReader.
+  // Autoplay-after-advance: click Play on the freshly mounted reader.
   // Runs only for drain-driven advances (autoPlayRef); manual selection
   // waits for the user's own tap. Scoped to this player's container, where
-  // the only `button.primary` is SyncedReader's Play toggle.
+  // the only `button.primary` is the reader's Play toggle.
   useEffect(() => {
     if (!autoPlayRef.current || !current) return;
     const btn = playerRef.current?.querySelector(
@@ -270,12 +255,15 @@ export default function ListenQueuePlayer() {
         {current ? (
           <section aria-label={`Now playing: ${current.title}`}>
             <h2>{current.title}</h2>
-            <SyncedReader
+            <UnifiedReader
               key={current.id}
-              text={current.text}
-              title={current.title}
-              startOffset={current.progressOffset}
-              onPosition={handlePosition}
+              article={{
+                id: current.id,
+                html: current.html,
+                text: current.text,
+                title: current.title,
+                progressOffset: current.progressOffset,
+              }}
               onEnded={handleEnded}
             />
           </section>

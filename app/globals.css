@@ -211,41 +211,28 @@ button:disabled {
   border-radius: 12px;
   margin: 1rem 0;
   font-family: system-ui, sans-serif;
+  background: var(--bg);
+}
+/* The listen bar sticks below the topbar while reading: sticky must sit on
+   the full-height section (a sticky .controls can't travel outside its own
+   tight parent). */
+.listen-bar {
   position: sticky;
   top: 65px;
   background: var(--bg);
   z-index: 5;
+  padding: 0.5rem 0;
 }
-.listen-text {
-  font-size: 1.15rem;
-}
-.listen-text .w {
+.article-body .w {
   border-radius: 4px;
   padding: 0 1px;
   cursor: pointer;
 }
-.listen-text .w.active {
+.article-body .w.active {
   background: var(--highlight-word);
   color: #000;
 }
-.listen-text .sent-active {
+.article-body .w.sent-active {
   background: var(--highlight-sent);
   border-radius: 6px;
-}
-.mode-toggle {
-  display: flex;
-  gap: 0.5rem;
-  margin: 1rem 0;
-  font-family: system-ui, sans-serif;
-  position: sticky;
-  top: 65px;
-  background: var(--bg);
-  z-index: 6;
-  padding: 0.5rem 0;
-}
-/* In listen mode the toggle and the player controls are both sticky: stack
-   the player below the toggle instead of overlapping it (which hid the
-   Read button and forced a scroll-to-top trip). */
-.mode-toggle + section .controls {
-  top: 130px;
 }

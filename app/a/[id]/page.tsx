@@ -4,7 +4,7 @@ import { readingMinutes } from "@/lib/text";
 import SiteHeader from "@/components/SiteHeader";
 import ArchiveButton from "@/components/ArchiveButton";
 import TrashButton from "@/components/TrashButton";
-import ReaderClient from "@/components/ReaderClient";
+import UnifiedReader from "@/components/UnifiedReader";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +44,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
             <em>{article.excerpt}</em>
           </p>
         )}
-        <ReaderClient article={article} />
+        <UnifiedReader article={article} />
       </main>
     </>
   );

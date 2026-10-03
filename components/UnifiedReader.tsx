@@ -1,0 +1,569 @@
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { splitSentences, splitWords } from "@/lib/text";
+import { clampOffset, fractionToOffset, offsetToFraction } from "@/lib/progress-sync";
+import {
+  buildWordAlignment,
+  estimateTextOffsetForHtmlIndex,
+  htmlIndexToTextOffset,
+  textOffsetToHtmlIndex,
+  type TextWord,
+  type WordAlignment,
+} from "@/lib/html-sync";
+import { tokenizeArticleHtml } from "@/lib/html-tokenize";
+import { clearMediaSession, setupMediaSession } from "@/lib/media-session";
+import { nextPlayPauseAction, isCanceledSpeechError } from "@/lib/speech-queue";
+import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
+import { persistProgressOffset } from "@/lib/offline-queue";
+import { useReadingProgress } from "./ThemeControl";
+
+/**
+ * UnifiedReader — one article view for reading + listening (Instapaper-style).
+ *
+ * There is no read/listen mode toggle: the sanitized article HTML is always
+ * rendered, with every visible word wrapped in a clickable span. The sticky
+ * listen bar (Play/Pause, rate, voice, auto-scroll, status) lives above it.
+ * Pressing Play (or clicking any word) speaks `article.text` via the Web
+ * Speech queue driver (same per-sentence queue semantics as the old
+ * SyncedReader) and highlights the spoken words in place, in this same view.
+ * Pausing keeps the position — scroll on to keep reading. No handoff, no
+ * remount, no lost scroll.
+ *
+ * Speech still consumes canonical `article.text` (progress offsets index into
+ * it); `lib/html-sync` aligns those offsets onto the visible HTML words for
+ * highlight + click-to-seek. Unmapped words fall back to neighbors so restore
+ * always highlights; unmapped clicks fall back to a fractional estimate.
+ *
+ * Link behavior: while idle/paused/error, taps inside `<a>` navigate normally
+ * (no seek steal). While playing, link taps are intercepted as seeks so a
+ * mid-listen tap never yanks the page away.
+ */
+
+export type UnifiedArticle = {
+  id: string;
+  html: string;
+  text: string;
+  title: string;
+  progressOffset: number;
+};
+
+/** Shared offline-safe sender: PUT `{ offset }`, queued on failure. */
+function sendOffset(id: string, offset: number) {
+  return fetch(`/api/articles/${id}/progress`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ offset }),
+  });
+}
+
+type AlignedModel = {
+  alignment: WordAlignment;
+  textWords: TextWord[];
+  sentenceHtml: number[][];
+  htmlCount: number;
+};
+
+export default function UnifiedReader({
+  article,
+  onEnded,
+}: {
+  article: UnifiedArticle;
+  /**
+   * Fired once when the sentence queue drains naturally (all utterances
+   * ended). NOT fired on pause, error, stop/cancel, or unmount — the queue
+   * player uses it to advance to the next article.
+   */
+  onEnded?: () => void;
+}) {
+  const { id, html, text, title } = article;
+  const textLength = text.length;
+  const initialOffset = clampOffset(article.progressOffset ?? 0, textLength);
+
+  const sentences = useMemo(() => splitSentences(text), [text]);
+  const textWords = useMemo(() => splitWords(text), [text]);
+
+  const [supported] = useState(() => typeof window !== "undefined" && "speechSynthesis" in window);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceURI, setVoiceURI] = useState<string>(() => loadVoiceSettings().voiceURI);
+  const [rate, setRate] = useState<number>(() => loadVoiceSettings().rate);
+  const [playing, setPlaying] = useState(false);
+  const [status, setStatus] = useState<"idle" | "playing" | "paused" | "error">("idle");
+  const [speakError, setSpeakError] = useState<string | null>(null);
+  const statusRef = useRef<"idle" | "playing" | "paused" | "error">("idle");
+  statusRef.current = status;
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  const queueRef = useRef<{ idx: number; speaking: boolean }>({ idx: 0, speaking: false });
+  const speakGenRef = useRef(0);
+  const optsRef = useRef({ voiceURI, rate });
+  optsRef.current = { voiceURI, rate };
+  const pauseUntilRef = useRef(0);
+  const activeOffsetRef = useRef<number>(initialOffset);
+  const sentenceRef = useRef<number | null>(null);
+  const autoScrollRef = useRef(autoScroll);
+  autoScrollRef.current = autoScroll;
+
+  // Tokenized article model (client-only: needs document). First paint (SSR)
+  // falls back to plain HTML below; the word-span view swaps in on mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const rootRef = useRef<HTMLElement | null>(null);
+  const modelRef = useRef<AlignedModel | null>(null);
+
+  // Throttled playhead persist: boundary ticks call reportPosition (max ~2s),
+  // pause/unmount/hide always flush the latest offset.
+  const lastSentRef = useRef<number | null>(null);
+  const lastSentAtRef = useRef(0);
+  const pendingRef = useRef<number | null>(null);
+
+  const reportPosition = useCallback(
+    (offset: number, force = false) => {
+      pendingRef.current = offset;
+      const now = Date.now();
+      if (!force && offset === lastSentRef.current) return;
+      if (!force && now - lastSentAtRef.current < 2000) return;
+      lastSentRef.current = offset;
+      lastSentAtRef.current = now;
+      persistProgressOffset(id, offset, textLength, sendOffset).catch(() => {});
+    },
+    [id, textLength]
+  );
+
+  const flushPosition = useCallback(() => {
+    const pending = pendingRef.current;
+    if (pending == null || pending === lastSentRef.current) return;
+    lastSentRef.current = pending;
+    lastSentAtRef.current = Date.now();
+    persistProgressOffset(id, pending, textLength, sendOffset).catch(() => {});
+  }, [id, textLength]);
+
+  const flushRef = useRef(flushPosition);
+  flushRef.current = flushPosition;
+  useEffect(() => {
+    function onVis() {
+      if (document.hidden) flushRef.current();
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      flushRef.current();
+    };
+  }, []);
+
+  // Read-side progress: scroll persists while not playing. While playing the
+  // playhead owns the server position (same last-writer-wins endpoint); the
+  // hook's 1s re-enable suppression covers the pause beat.
+  const handleScrollPosition = useCallback(
+    (next: number) => {
+      persistProgressOffset(id, next, textLength, sendOffset).catch(() => {});
+    },
+    [id, textLength]
+  );
+  useReadingProgress(id, offsetToFraction(initialOffset, textLength), {
+    textLength,
+    enabled: !playing,
+    onPosition: handleScrollPosition,
+  });
+
+  const applyHighlight = useCallback(
+    (textOffset: number, sentenceIdx: number | null, opts?: { silent?: boolean }) => {
+      activeOffsetRef.current = textOffset;
+      const model = modelRef.current;
+      const root = rootRef.current;
+      const hi = model ? textOffsetToHtmlIndex(textOffset, model.textWords, model.alignment) : null;
+      if (root) {
+        root.querySelectorAll(".w.active").forEach((el) => el.classList.remove("active"));
+        if (hi != null) root.querySelector(`[data-hi="${hi}"]`)?.classList.add("active");
+        if (sentenceIdx !== sentenceRef.current) {
+          root
+            .querySelectorAll(".w.sent-active")
+            .forEach((el) => el.classList.remove("sent-active"));
+          if (sentenceIdx != null && model) {
+            for (const j of model.sentenceHtml[sentenceIdx] ?? []) {
+              root.querySelector(`[data-hi="${j}"]`)?.classList.add("sent-active");
+            }
+          }
+          sentenceRef.current = sentenceIdx;
+        }
+        if (hi != null && autoScrollRef.current && Date.now() >= pauseUntilRef.current) {
+          root
+            .querySelector(`[data-hi="${hi}"]`)
+            ?.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      } else {
+        sentenceRef.current = sentenceIdx;
+      }
+      if (!opts?.silent) reportPosition(textOffset);
+    },
+    [reportPosition]
+  );
+
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supported) return;
+    const load = () => {
+      const vs = window.speechSynthesis.getVoices();
+      if (vs.length) setVoices(vs);
+    };
+    load();
+    window.speechSynthesis.addEventListener?.("voiceschanged", load);
+    return () => {
+      window.speechSynthesis.removeEventListener?.("voiceschanged", load);
+      window.speechSynthesis.cancel();
+    };
+  }, [supported]);
+
+  useEffect(() => {
+    if (!voices.length || !voiceURI) return;
+    if (!voices.some((v) => v.voiceURI === voiceURI)) {
+      setVoiceURI("");
+      saveVoiceSettings({ rate: optsRef.current.rate, voiceURI: "" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voices]);
+
+  // Pause auto-scroll briefly when user scrolls manually
+  useEffect(() => {
+    const pause = () => {
+      pauseUntilRef.current = Date.now() + 3000;
+    };
+    window.addEventListener("wheel", pause, { passive: true });
+    window.addEventListener("touchmove", pause, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", pause);
+      window.removeEventListener("touchmove", pause);
+    };
+  }, []);
+
+  const speakSentenceRange = useCallback(
+    (fromOffset: number, overrides?: { voiceURI?: string; rate?: number }) => {
+      if (!supported) return;
+      const synth = window.speechSynthesis;
+      speakGenRef.current += 1;
+      const gen = speakGenRef.current;
+      synth.cancel();
+      const vuri = overrides?.voiceURI ?? optsRef.current.voiceURI;
+      const r = overrides?.rate ?? optsRef.current.rate;
+      const voice = voices.find((v) => v.voiceURI === vuri) ?? null;
+
+      let startIdx = sentences.findIndex((s) => fromOffset < s.end);
+      if (startIdx === -1) startIdx = 0;
+      queueRef.current = { idx: startIdx, speaking: true };
+      setPlaying(true);
+      setStatus("playing");
+      setSpeakError(null);
+
+      const speakIdx = (idx: number, charStart: number) => {
+        if (!queueRef.current.speaking || idx >= sentences.length) {
+          queueRef.current.speaking = false;
+          setPlaying(false);
+          if (statusRef.current !== "error") setStatus("idle");
+          if (idx >= sentences.length && aliveRef.current) onEndedRef.current?.();
+          return;
+        }
+        queueRef.current.idx = idx;
+        const s = sentences[idx]!;
+        const sliceFrom = Math.max(0, charStart - s.start);
+        const utterText = sliceFrom > 0 ? s.text.slice(sliceFrom) : s.text;
+        const utterStart = charStart > s.start ? charStart : s.start;
+        if (!utterText.trim()) {
+          speakIdx(idx + 1, sentences[idx + 1]?.start ?? charStart);
+          return;
+        }
+        const u = new SpeechSynthesisUtterance(utterText);
+        u.rate = r;
+        if (voice) u.voice = voice;
+        u.onboundary = (e: SpeechSynthesisEvent) => {
+          if (gen !== speakGenRef.current) return;
+          const rel = typeof e.charIndex === "number" ? e.charIndex : 0;
+          const global = utterStart + rel;
+          const sIdx = sentences.findIndex((x) => global >= x.start && global < x.end);
+          applyHighlight(global, sIdx === -1 ? null : sIdx);
+        };
+        u.onend = () => {
+          if (gen !== speakGenRef.current) return;
+          if (!queueRef.current.speaking || statusRef.current === "error") return;
+          speakIdx(idx + 1, sentences[idx + 1]?.start ?? utterStart);
+        };
+        u.onerror = (ev: SpeechSynthesisErrorEvent) => {
+          if (gen !== speakGenRef.current) return;
+          const code = (ev as SpeechSynthesisErrorEvent | undefined)?.error;
+          if (isCanceledSpeechError(code)) return;
+          queueRef.current.speaking = false;
+          setPlaying(false);
+          const detail =
+            typeof (ev as SpeechSynthesisErrorEvent | undefined)?.error === "string" &&
+            (ev as SpeechSynthesisErrorEvent).error
+              ? `Speech error: ${(ev as SpeechSynthesisErrorEvent).error}`
+              : "Speech error: playback failed";
+          setSpeakError(detail);
+          setStatus("error");
+          flushPosition();
+        };
+        synth.speak(u);
+        // Sentence-level fallback highlight (Firefox has no word events)
+        applyHighlight(utterStart, idx);
+      };
+
+      speakIdx(startIdx, fromOffset);
+    },
+    [sentences, supported, voices, applyHighlight, flushPosition]
+  );
+
+  // First Play in a view starts from where you're reading: capture the live
+  // scroll position (the playhead ref only knows the last *listen* offset,
+  // which is 0 on a fresh read-to-listen switch). Later starts (retry after
+  // error, replay after drain) resume the kept playhead instead.
+  const hasPlayedRef = useRef(false);
+
+  function onPlayPause() {
+    if (!supported) return;
+    const synth = window.speechSynthesis;
+    const action = nextPlayPauseAction({
+      queueSpeaking: queueRef.current.speaking,
+      playing,
+      status: statusRef.current,
+      synthPaused: synth.paused,
+      synthSpeaking: synth.speaking,
+    });
+    if (action === "pause") {
+      synth.pause();
+      setPlaying(false);
+      setStatus("paused");
+      flushPosition();
+      return;
+    }
+    if (action === "resume") {
+      synth.resume();
+      setPlaying(true);
+      setStatus("playing");
+      return;
+    }
+    let start = activeOffsetRef.current ?? 0;
+    if (!hasPlayedRef.current) {
+      try {
+        const h = document.documentElement.scrollHeight - window.innerHeight;
+        if (h > 0) {
+          const p = Math.min(1, Math.max(0, window.scrollY / h));
+          start = fractionToOffset(p, textLength);
+        }
+      } catch {
+        // DOM read failed (SSR/test) — fall back to the kept playhead.
+      }
+    }
+    hasPlayedRef.current = true;
+    speakSentenceRange(start);
+  }
+
+  const seekFromHtml = useCallback(
+    (hi: number, e?: Pick<ReactMouseEvent, "preventDefault" | "target">) => {
+      const model = modelRef.current;
+      // Taps inside links navigate while idle/paused/error; while playing
+      // they seek (never yank the page away mid-listen).
+      const inLink =
+        e?.target instanceof Element ? (e.target as Element).closest("a") != null : false;
+      const activelyPlaying = queueRef.current.speaking && statusRef.current === "playing";
+      if (inLink && !activelyPlaying) return;
+      if (inLink) e?.preventDefault();
+      let off = model ? htmlIndexToTextOffset(hi, model.textWords, model.alignment) : null;
+      if (off == null) off = estimateTextOffsetForHtmlIndex(hi, model?.htmlCount ?? 0, textLength);
+      hasPlayedRef.current = true;
+      speakSentenceRange(off);
+    },
+    [speakSentenceRange, textLength]
+  );
+  const seekRef = useRef(seekFromHtml);
+  seekRef.current = seekFromHtml;
+
+  function handleRateChange(next: number) {
+    setRate(next);
+    const voice = optsRef.current.voiceURI;
+    optsRef.current = { voiceURI: voice, rate: next };
+    saveVoiceSettings({ rate: next, voiceURI: voice });
+    if (queueRef.current.speaking && statusRef.current === "playing") {
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: next, voiceURI: voice });
+    }
+  }
+
+  function handleVoiceChange(nextURI: string) {
+    setVoiceURI(nextURI);
+    const r = optsRef.current.rate;
+    optsRef.current = { voiceURI: nextURI, rate: r };
+    saveVoiceSettings({ rate: r, voiceURI: nextURI });
+    if (queueRef.current.speaking && statusRef.current === "playing") {
+      speakSentenceRange(activeOffsetRef.current ?? 0, { rate: r, voiceURI: nextURI });
+    }
+  }
+
+  function pausePlayback() {
+    if (!supported) return;
+    if (!queueRef.current.speaking || statusRef.current !== "playing") return;
+    window.speechSynthesis.pause();
+    setPlaying(false);
+    setStatus("paused");
+    flushPosition();
+  }
+
+  const playPauseRef = useRef(onPlayPause);
+  playPauseRef.current = onPlayPause;
+  const pauseRef = useRef(pausePlayback);
+  pauseRef.current = pausePlayback;
+  useEffect(() => {
+    const sessionActive = playing || statusRef.current === "paused";
+    if (!sessionActive) {
+      clearMediaSession();
+      return;
+    }
+    setupMediaSession(title ?? "Readapaper", {
+      onPlay: () => playPauseRef.current(),
+      onPause: () => playPauseRef.current(),
+      onStop: () => pauseRef.current(),
+    });
+    return () => clearMediaSession();
+  }, [playing, status, title]);
+
+  const tokenized = useMemo(() => {
+    if (!mounted || typeof document === "undefined") return null;
+    const { nodes, htmlWords } = tokenizeArticleHtml(html, document, (hi, e) =>
+      seekRef.current(hi, e)
+    );
+    const alignment = buildWordAlignment(textWords, htmlWords);
+    const sentenceHtml: number[][] = sentences.map(() => []);
+    htmlWords.forEach((_, j) => {
+      const ti = alignment.htmlToText[j];
+      if (ti == null) return;
+      const off = textWords[ti]?.start;
+      if (off == null) return;
+      const si = sentences.findIndex((s) => off >= s.start && off < s.end);
+      if (si !== -1) sentenceHtml[si]!.push(j);
+    });
+    return { nodes, alignment, sentenceHtml, htmlCount: htmlWords.length };
+  }, [html, mounted, textWords, sentences]);
+
+  useEffect(() => {
+    if (!tokenized) {
+      modelRef.current = null;
+      return;
+    }
+    modelRef.current = {
+      alignment: tokenized.alignment,
+      textWords,
+      sentenceHtml: tokenized.sentenceHtml,
+      htmlCount: tokenized.htmlCount,
+    };
+    // Silent restore: highlight the saved word with no autoplay, no persist.
+    const si = sentences.findIndex((s) => initialOffset >= s.start && initialOffset < s.end);
+    applyHighlight(initialOffset, si === -1 ? null : si, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenized]);
+
+  const hasSpeech = sentences.length > 0;
+
+  return (
+    <div>
+      {supported && hasSpeech ? (
+        <section aria-label="Listen in sync" className="listen-bar">
+          <div className="controls">
+            <button className="primary" onClick={onPlayPause}>
+              {playing
+                ? "⏸ Pause"
+                : status === "error"
+                  ? "↻ Retry"
+                  : status === "paused"
+                    ? "▶ Resume"
+                    : "▶ Listen"}
+            </button>
+            <label>
+              Rate{" "}
+              <select
+                value={rate}
+                onChange={(e) => handleRateChange(Number(e.target.value))}
+                aria-label="Speech rate"
+              >
+                {[0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
+                  <option key={r} value={r}>
+                    {r}x
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Voice{" "}
+              <select
+                value={voiceURI}
+                onChange={(e) => handleVoiceChange(e.target.value)}
+                aria-label="Voice"
+                style={{ maxWidth: 220 }}
+              >
+                <option value="">Default</option>
+                {voices.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>
+                    {v.name} ({v.lang})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(e) => setAutoScroll(e.target.checked)}
+              />{" "}
+              Auto-scroll
+            </label>
+            <span role="status" aria-live="polite" data-testid="listen-status" className="muted">
+              Status:{" "}
+              {status === "playing"
+                ? "Playing"
+                : status === "paused"
+                  ? "Paused"
+                  : status === "error"
+                    ? `Error${speakError ? ` — ${speakError}` : ""}`
+                    : "Idle"}
+            </span>
+          </div>
+        </section>
+      ) : (
+        <p className="muted">
+          {!supported
+            ? "Text-to-speech is not supported in this browser. Try Chrome or Edge."
+            : "No readable text for speech."}
+        </p>
+      )}
+
+      {tokenized ? (
+        <article
+          className="article-body"
+          role="article"
+          aria-label="Article"
+          ref={rootRef as React.RefObject<HTMLElement>}
+        >
+          {tokenized.nodes}
+        </article>
+      ) : (
+        <article
+          className="article-body"
+          // Sanitized server-side with DOMPurify allowlist (see lib/extract.ts)
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
+      <p className="muted">
+        Tip: click any word to listen from there — the highlight follows right here. Pause to keep
+        reading; links work while paused.
+      </p>
+    </div>
+  );
+}
