@@ -22,9 +22,15 @@ import {
   type AudioSentencePlan,
 } from "@/lib/audio-queue";
 import { ensureMespeakLoaded, synthesizeWavArray } from "@/lib/mespeak-tts";
-import { loadTtsEngine, rateToWpm, saveTtsEngine, type TtsEngine } from "@/lib/tts-engine";
+import {
+  DEFAULT_TTS_ENGINE,
+  loadTtsEngine,
+  rateToWpm,
+  saveTtsEngine,
+  type TtsEngine,
+} from "@/lib/tts-engine";
 import { wavArrayToBlob } from "@/lib/wav";
-import { loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
+import { DEFAULT_VOICE_SETTINGS, loadVoiceSettings, saveVoiceSettings } from "@/lib/voice-settings";
 import { persistProgressOffset } from "@/lib/offline-queue";
 import { useReadingProgress } from "./ThemeControl";
 
@@ -101,11 +107,18 @@ export default function UnifiedReader({
   const sentences = useMemo(() => splitSentences(text), [text]);
   const textWords = useMemo(() => splitWords(text), [text]);
 
-  const [supported] = useState(() => typeof window !== "undefined" && "speechSynthesis" in window);
+  // Hydration-safe: SSR and the first client render must match exactly.
+  // Browser-only sources (speechSynthesis, localStorage-backed voice/rate/
+  // engine) differ per device, so initialize from SSR-safe defaults and
+  // hydrate the real values in an effect (post-hydration update, no mismatch).
+  // The listen bar below stays gated on `mounted` for the same reason: the
+  // server can never know client TTS support, so both sides render a neutral
+  // loading placeholder first instead of flashing a false "not supported".
+  const [supported, setSupported] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voiceURI, setVoiceURI] = useState<string>(() => loadVoiceSettings().voiceURI);
-  const [rate, setRate] = useState<number>(() => loadVoiceSettings().rate);
-  const [engine, setEngine] = useState<TtsEngine>(() => loadTtsEngine());
+  const [voiceURI, setVoiceURI] = useState<string>(DEFAULT_VOICE_SETTINGS.voiceURI);
+  const [rate, setRate] = useState<number>(DEFAULT_VOICE_SETTINGS.rate);
+  const [engine, setEngine] = useState<TtsEngine>(DEFAULT_TTS_ENGINE);
   const [playing, setPlaying] = useState(false);
   const [status, setStatus] = useState<"idle" | "playing" | "paused" | "error">("idle");
   const [speakError, setSpeakError] = useState<string | null>(null);
@@ -137,9 +150,15 @@ export default function UnifiedReader({
 
   // Tokenized article model (client-only: needs document). First paint (SSR)
   // falls back to plain HTML below; the word-span view swaps in on mount.
+  // The same flag gates browser-only TTS state so hydration stays exact.
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
+    setSupported("speechSynthesis" in window);
+    const saved = loadVoiceSettings();
+    setVoiceURI(saved.voiceURI);
+    setRate(saved.rate);
+    setEngine(loadTtsEngine());
   }, []);
 
   const rootRef = useRef<HTMLElement | null>(null);
@@ -839,7 +858,12 @@ export default function UnifiedReader({
 
   return (
     <div>
-      {ttsAvailable && hasSpeech ? (
+      {!mounted ? (
+        // SSR + first client paint (hydration must match): the server cannot
+        // know client TTS support, so render a neutral placeholder instead of
+        // guessing "supported" vs "not supported".
+        <p className="muted">{hasSpeech ? "Loading audio…" : "No readable text for speech."}</p>
+      ) : ttsAvailable && hasSpeech ? (
         <section aria-label="Listen in sync" className="listen-bar">
           <div className="controls">
             <button className="primary" onClick={onPlayPause}>
