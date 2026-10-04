@@ -13,6 +13,23 @@ describe("buildBookmarklet", () => {
     expect(out).toContain("fetch(BASE+'/api/articles'");
   });
 
+  it("relays via window.open + postMessage first to avoid the local-network prompt", () => {
+    const out = buildBookmarklet("https://reader.example.com");
+    expect(out).toContain("window.open(BASE+'/bookmarklet#autosave'");
+    expect(out).toContain("postMessage(payload,BASE)");
+    expect(out).toContain("readapaper-save");
+    expect(out).toContain("readapaper-saved");
+    expect(out).toContain("readapaper-error");
+    expect(out).toContain("readapaper-ready");
+    // Direct fetch stays as the popup-blocked fallback.
+    expect(out).toContain("fetch(BASE+'/api/articles'");
+  });
+
+  it("tags the direct-save fallback with targetAddressSpace", () => {
+    const out = buildBookmarklet("https://reader.example.com");
+    expect(out).toContain("targetAddressSpace");
+  });
+
   it("strips a trailing slash from the base", () => {
     const withSlash = buildBookmarklet("https://reader.example.com/");
     const withoutSlash = buildBookmarklet("https://reader.example.com");
@@ -31,7 +48,7 @@ describe("buildBookmarklet", () => {
     const out = buildBookmarklet("http://localhost:3000");
     expect(out).toContain("navigator.clipboard");
     expect(out).toContain("writeText(html)");
-    expect(out).toContain("CSP/mixed-content");
+    expect(out).toContain("local-network permission");
     expect(out).toContain("/bookmarklet#manual");
     expect(out).toContain("location.protocol");
   });

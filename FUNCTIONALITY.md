@@ -82,10 +82,11 @@ Single-user, local, web-only Instapaper clone. No auth, no accounts, no paid/ser
 ## 7. Bookmarklet (`/bookmarklet`)
 
 - Install page generates a `javascript:` bookmarklet locked to the current instance origin, with drag-to-bookmarks install, copy-to-clipboard, and imperative `href` fix for React 19 sanitization.
-- Bookmarklet runs inside the live article page (inherits cookies/sessions, rendered JS/SPA content, paywall unlocks; looks like a normal user to bot checks) and POSTs `{ url, page HTML }` through the normal server Readability + sanitize pipeline.
+- Bookmarklet runs inside the live article page (inherits cookies/sessions, rendered JS/SPA content, paywall unlocks; looks like a normal user to bot checks) and hands `{ url, page HTML }` to `/bookmarklet#autosave` in a new tab via `window.open` + `postMessage`; that tab saves same-origin through the normal server Readability + sanitize pipeline. Same-origin relay avoids Chrome 142+ Local Network Access per-site prompts (including `*.ts.net` Tailscale hosts, still local `100.64/10`), `connect-src` CSP blocks, CORS, and mixed-content.
+- Direct cross-origin `POST /api/articles` stays as the popup-blocked fallback (with `targetAddressSpace` annotation), then clipboard + manual save.
 - Size guards (too-small DOM rejected, ~9MB client cap, 10MB server cap).
-- Toast UI for Saving / Saved-or-already-present (with Open link) / server error.
-- On CSP/mixed-content blocks, automatically copies the page HTML to the clipboard and directs the user to the Manual-save form (URL + pasted HTML) on the same page.
+- Toast UI for Saving / Saved-or-already-present (with Open link) / server error; relay tab shows its own save status with Open link and acks the opener.
+- On CSP/mixed-content/local-network blocks, automatically copies the page HTML to the clipboard and directs the user to the Manual-save form (URL + pasted HTML) on the same page.
 - Documents the hard-paywall limit: only text actually rendered in the DOM can be saved.
 - Server CORS explicitly allows cross-origin bookmarklet POSTs.
 
